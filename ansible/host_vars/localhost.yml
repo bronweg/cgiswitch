@@ -1,2 +1,0 @@
----
-ansible_python_interpreter: "{{ lookup('env', 'VIRTUAL_ENV') }}/bin/python3"

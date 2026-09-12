@@ -732,7 +732,6 @@ def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
 @pytest.mark.parametrize(
     "path",
     [
-        pathlib.Path("ansible/action_plugins/jtcom_config.py"),
         pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"),
     ],
 )
@@ -753,7 +752,6 @@ def test_action_plugin_int_list_helper_preserves_missing_none_and_empty_list(
 @pytest.mark.parametrize(
     ("path", "verify_tls_default"),
     [
-        (pathlib.Path("ansible/action_plugins/jtcom_config.py"), False),
         (pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"), True),
     ],
 )
@@ -830,7 +828,6 @@ def test_action_plugin_passes_allow_vlan_delete_in_use_only_when_present(
 @pytest.mark.parametrize(
     ("path", "verify_tls_default"),
     [
-        (pathlib.Path("ansible/action_plugins/jtcom_config.py"), False),
         (pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"), True),
     ],
 )

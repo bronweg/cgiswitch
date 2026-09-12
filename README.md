@@ -48,7 +48,6 @@ pip install -e ".[dev]"
 | Port-centric membership ops | `access_vlan`, `native_vlan`, `trunk_add_vlans`, `trunk_remove_vlans`, `trunk_set_vlans` |
 | Incremental port patching | `apply_device_config()` with `ports=` |
 | Full device config apply | `apply_device_config(desired, check_mode=False)` |
-| Ansible standalone plugin | `ansible/` — zero subprocess, direct import |
 | Ansible Galaxy collection | `bronweg.cgiswitch.jtcom_config` |
 
 ### Port Numbering
@@ -317,64 +316,9 @@ Runnable scripts in [`examples/`](examples):
 
 ---
 
-## Ansible
+## Ansible Collection
 
-Two integration paths are provided: a **standalone plugin** and a **Galaxy collection**.
-
-### Standalone plugin (`ansible/`)
-
-The `ansible/` directory contains a native action plugin that imports `napalm_jtcom`
-directly — no subprocess overhead, works out of the box once `napalm-jtcom` is installed
-in the same Python environment as Ansible.
-
-Add the plugin paths to your `ansible.cfg`:
-
-```ini
-[defaults]
-library        = /path/to/napalm-jtcom/ansible/library
-action_plugins = /path/to/napalm-jtcom/ansible/action_plugins
-```
-
-Example task:
-
-```yaml
-- name: Configure switch VLANs and ports
-  jtcom_config:
-    host: "{{ jtcom_host }}"
-    username: "{{ jtcom_user }}"
-    password: "{{ jtcom_pass }}"
-    vlans:
-      10:
-        name: Management
-        state: present
-      20:
-        tagged_add: [7, 8]
-        state: present
-      30:
-        untagged_add: [1, 2, 3]
-        state: present
-      99:
-        state: absent
-    ports:
-      7:
-        native_vlan: 10
-        trunk_add_vlans: [20, 30]
-      8:
-        admin_up: true
-        speed_duplex: Auto
-        flow_control: false
-```
-
-Common standalone scenarios:
-
-- create VLAN 61 and tag ports 1..5
-- configure an access port with `access_vlan`
-- configure a trunk with `native_vlan` + `trunk_set_vlans`
-- allow an explicit untagged move with `allow_untagged_move: true`
-- allow VLAN delete-in-use with `allow_vlan_delete_in_use: true`
-- review warnings safely with `--check`
-
-### Galaxy Collection (`bronweg.cgiswitch`)
+The supported Ansible interface is the `bronweg.cgiswitch` Galaxy collection.
 
 A packaged collection lives at `galaxy/bronweg/cgiswitch/`.
 FQCN: `bronweg.cgiswitch.jtcom_config`
@@ -382,9 +326,8 @@ FQCN: `bronweg.cgiswitch.jtcom_config`
 Build and install:
 
 ```bash
-cd galaxy/bronweg/cgiswitch
-ansible-galaxy collection build --force
-ansible-galaxy collection install galaxy/bronweg/cgiswitch/bronweg-cgiswitch-0.1.0.tar.gz
+ansible-galaxy collection build --force galaxy/bronweg/cgiswitch
+ansible-galaxy collection install bronweg-cgiswitch-0.1.0.tar.gz
 ```
 
 Example task:
@@ -418,15 +361,8 @@ Example task:
         flow_control: false
 ```
 
-Both the standalone plugin and the collection support Ansible `--check` (dry-run) mode.
-
-**Key differences between the two:**
-
-| Setting | Standalone (`ansible/`) | Collection (`bronweg.cgiswitch`) |
-|---|---|---|
-| `verify_tls` default | `false` | `true` (production-safe) |
-| `safety_port_id` | configurable, default 6 | hardcoded 6, not exposed |
-| Port speed key | `speed_duplex` | `speed` |
+The collection supports Ansible `--check` (dry-run) mode. It uses production-safe
+TLS verification by default and protects management port 6 from administrative shutdown.
 
 Collection examples:
 - [`galaxy/bronweg/cgiswitch/examples/access_port.yml`](galaxy/bronweg/cgiswitch/examples/access_port.yml)
@@ -455,12 +391,6 @@ napalm-jtcom/
     model/             # Typed dataclass models (VlanConfig, PortConfig, DeviceConfig …)
     utils/             # Diff/plan engines (vlan_diff, device_diff, port_diff, render)
     vendor/jtcom/      # JTCom-specific endpoint paths and field mappings
-  ansible/
-    action_plugins/    # jtcom_config action plugin (imports napalm_jtcom directly)
-    library/           # jtcom_config module stub (docs / argument_spec for ansible-doc)
-    inventory.ini      # Example inventory
-    ansible.cfg        # Ansible configuration
-    test_playbook.yml  # Example playbook
   galaxy/
     bronweg/cgiswitch/ # Ansible Galaxy collection (bronweg.cgiswitch, v0.1.0)
       galaxy.yml       # Collection manifest
@@ -496,8 +426,8 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, testing, and contribut
 pytest
 
 # Lint + type-check
-ruff check src/ tests/ ansible/ galaxy/ examples/
-mypy src/ ansible/
+ruff check .
+mypy src/
 
 # Build the Galaxy collection
 cd galaxy/bronweg/cgiswitch
