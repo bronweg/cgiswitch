@@ -35,6 +35,7 @@ dev = [
     "pytest-cov>=5.0",
     "mypy>=1.10",
     "ruff>=0.5",
+    "build>=1.2",
     "types-requests",
     "responses>=0.25",
 ]
