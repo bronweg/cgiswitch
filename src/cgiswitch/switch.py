@@ -30,7 +30,7 @@ from cgiswitch.utils.normalize import normalize_device_config
 from cgiswitch.utils.operations import compile_apply_operations, compile_membership_operations
 from cgiswitch.utils.policy import evaluate_device_policy
 from cgiswitch.utils.port_vlan_input import merge_port_vlan_membership_inputs
-from cgiswitch.utils.render import render_diff
+from cgiswitch.utils.render import render_diff, render_effective_diff
 from cgiswitch.utils.validation import validate_desired_config
 from cgiswitch.utils.vlan_membership import (
     PortMembershipMap,
@@ -242,13 +242,13 @@ class JTComSwitch:
             current_n,
             desired_plan_n,
         )
-        diff = render_diff(plan)
         membership_plan = self._plan_vlan_membership(
             current_vlans,
             current_ports,
             desired_plan_n.vlans,
             policy=self.policy,
         )
+        diff = render_effective_diff(current_n, desired_plan_n, membership_plan)
         violations = evaluate_device_policy(plan, self.policy) + membership_plan.violations
         if membership_plan.changed_ports or membership_plan.warnings or membership_plan.violations:
             diff["vlan_membership"] = {
@@ -301,6 +301,7 @@ class JTComSwitch:
         completed: list[dict[str, str]] = []
         failed_operation = {"key": "backup", "kind": "backup"}
         write_attempted = False
+        readback: dict[str, Any] | None = None
         try:
             if self.policy.backup_before_change:
                 backup_file = self._save_backup(session, self.policy.backup_dir)
@@ -314,6 +315,7 @@ class JTComSwitch:
 
             failed_operation = {"key": "verify", "kind": "verification"}
             post_vlans, post_ports = self._read_current_state(session)
+            readback = _serialize_readback(post_vlans, post_ports)
             post_cfg = DeviceConfig.from_current(post_vlans, post_ports)
             post_n = normalize_device_config(post_cfg)
             missing_ports = sorted(set(verification_desired.ports) - set(post_n.ports))
@@ -330,18 +332,13 @@ class JTComSwitch:
                 session, membership_plan, current_state=(post_vlans, post_ports),
             )
         except Exception as exc:
-            readback: dict[str, Any] | None = None
             readback_error: Exception | None = None
-            try:
-                observed_vlans, observed_ports = self._read_current_state(session)
-                readback = {
-                    "vlans": {vid: asdict(vlan) for vid, vlan in sorted(observed_vlans.items())},
-                    "ports": [asdict(port) for port in sorted(
-                        observed_ports, key=lambda port: port.port_id,
-                    )],
-                }
-            except Exception as recovery_exc:
-                readback_error = recovery_exc
+            if readback is None:
+                try:
+                    observed_vlans, observed_ports = self._read_current_state(session)
+                    readback = _serialize_readback(observed_vlans, observed_ports)
+                except Exception as recovery_exc:
+                    readback_error = recovery_exc
             raise JTComApplyError(
                 backup_file=backup_file,
                 completed_operations=completed,
@@ -570,3 +567,13 @@ class JTComSwitch:
         if self._session is None:
             raise JTComError("Session not open — call open() first.")
         return self._session
+
+
+def _serialize_readback(
+    vlans: dict[int, VlanEntry], ports: list[PortSettings],
+) -> dict[str, Any]:
+    """Capture a detached snapshot before verification can fail."""
+    return {
+        "vlans": {vid: asdict(vlan) for vid, vlan in sorted(vlans.items())},
+        "ports": [asdict(port) for port in sorted(ports, key=lambda port: port.port_id)],
+    }

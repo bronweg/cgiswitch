@@ -70,6 +70,12 @@ client. A failure after writes begin returns structured context with
 `remaining_diff`. Policy and preflight failures remain blocked before backup or
 writes. Automatic rollback is not performed.
 
+Verification failures retain the exact readback snapshot used to compute
+`remaining_diff`. A recovery read is attempted only when no usable verification
+snapshot exists, such as when the verification read itself fails. Returned diffs
+reflect effective membership after policy/fallback resolution; an effective
+no-op has no changes in its diff, while advisory warnings remain available.
+
 VLAN membership policy:
 
 - Untagged/native VLAN moves fail by default; use `allow_untagged_move: true`

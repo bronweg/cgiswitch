@@ -151,6 +151,12 @@ may have been attempted, `changed` is conservatively `true`, including when
 the first write fails. Verification failures include `remaining_diff`.
 No automatic rollback is attempted.
 
+Verification failures retain the exact readback snapshot used to compute
+`remaining_diff`. A recovery read is attempted only when no usable verification
+snapshot exists, such as when the verification read itself fails. Returned diffs
+reflect effective membership after policy/fallback resolution; an effective
+no-op has no changes in its diff, while advisory warnings remain available.
+
 ### Referenced VLANs
 
 Port-centric `access_vlan`, `native_vlan`, `trunk_add_vlans`, and
