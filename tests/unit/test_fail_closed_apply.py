@@ -248,6 +248,36 @@ def test_mismatched_desired_port_key_fails_before_mutation(monkeypatch: pytest.M
     session.download_config_backup.assert_not_called()
 
 
+@pytest.mark.parametrize("check_mode", [False, True])
+def test_mismatched_desired_vlan_key_fails_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    check_mode: bool,
+) -> None:
+    switch = JTComSwitch("192.0.2.1", "admin", "secret")
+    session = MagicMock()
+    switch._session = session
+    planner = MagicMock()
+    monkeypatch.setattr("cgiswitch.switch.build_device_plan", planner)
+    backup = MagicMock()
+    monkeypatch.setattr(switch, "_save_backup", backup)
+    monkeypatch.setattr(
+        switch,
+        "_read_current_state",
+        lambda _: ({}, [PortSettings(1, "Port 1", True, "Auto", False)]),
+    )
+
+    with pytest.raises(ValueError, match="mismatched vlan_id"):
+        switch.apply(
+            DeviceConfig(vlans={20: VlanConfig(30, name="wrong-key")}),
+            check_mode=check_mode,
+        )
+
+    planner.assert_not_called()
+    backup.assert_not_called()
+    session.post.assert_not_called()
+    session.download_config_backup.assert_not_called()
+
+
 @pytest.mark.parametrize("field", ["access", "native", "permit", "mode", "id"])
 @pytest.mark.parametrize("check_mode", [False, True])
 def test_malformed_vlan_page_blocks_apply_without_backup(field: str, check_mode: bool) -> None:

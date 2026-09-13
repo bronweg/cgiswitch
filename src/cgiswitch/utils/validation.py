@@ -8,6 +8,12 @@ from cgiswitch.model.port import PortSettings
 
 def validate_desired_ports(desired: DeviceConfig, current_ports: list[PortSettings]) -> None:
     """Reject unknown references before normalization or planning can discard them."""
+    for vlan_id, vlan_config in sorted(desired.vlans.items()):
+        if vlan_id != vlan_config.vlan_id:
+            raise ValueError(
+                f"vlans[{vlan_id}]: mismatched vlan_id={vlan_config.vlan_id}; "
+                "dictionary key must match vlan_id"
+            )
     known = {port.port_id for port in current_ports}
     referenced = set(desired.ports)
     for port_id, config in sorted(desired.ports.items()):
