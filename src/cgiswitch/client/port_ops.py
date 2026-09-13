@@ -69,20 +69,26 @@ def apply_port_changes(
             :func:`~cgiswitch.utils.port_diff.plan_port_changes`.
 
     Raises:
-        ValueError: If a required speed/duplex token is unknown.
+        ValueError: If any required preserved field or speed/duplex token is unknown.
         JTComSwitchError: If the switch returns a non-zero response code.
     """
-    if not change_set.update:
-        return
-
-    settings_by_id: dict[int, PortSettings] = {s.port_id: s for s in current_settings}
-
-    for cfg in change_set.update:
-        current = settings_by_id.get(cfg.port_id)
-        payload = _build_port_payload(cfg, current)
-        logger.debug("Setting port %d: %s", cfg.port_id, payload)
+    for payload in compile_port_changes(current_settings, change_set):
+        port_id = int(payload["portid"]) + 1
+        logger.debug("Setting port %d: %s", port_id, payload)
         session.post(PORT_SETTINGS, data=payload)
-        logger.info("Port %d configuration applied", cfg.port_id)
+        logger.info("Port %d configuration applied", port_id)
+
+
+def compile_port_changes(
+    current_settings: list[PortSettings],
+    change_set: PortChangeSet,
+) -> list[dict[str, str]]:
+    """Resolve every required field before issuing any port write."""
+    settings_by_id = {settings.port_id: settings for settings in current_settings}
+    return [
+        _build_port_payload(cfg, settings_by_id.get(cfg.port_id))
+        for cfg in sorted(change_set.update, key=lambda cfg: cfg.port_id)
+    ]
 
 
 def _build_port_payload(
@@ -111,17 +117,21 @@ def _build_port_payload(
     admin_up: bool
     if desired.admin_up is not None:
         admin_up = desired.admin_up
-    elif current is not None:
+    elif current is not None and current.admin_up is not None:
         admin_up = current.admin_up
     else:
-        raise ValueError(f"port_id={desired.port_id}: admin_up is None and no current settings")
+        raise ValueError(
+            f"port_id={desired.port_id}: admin_up is None in desired and current settings"
+        )
 
     # Resolve speed_duplex
     speed_token: str | None = desired.speed_duplex
     if speed_token is None:
         speed_token = current.speed_duplex if current is not None else None
     if speed_token is None:
-        raise ValueError(f"port_id={desired.port_id}: speed_duplex is None and no current settings")
+        raise ValueError(
+            f"port_id={desired.port_id}: speed_duplex is None in desired and current settings"
+        )
     speed_code = SPEED_TOKEN_TO_CODE.get(speed_token)
     if speed_code is None:
         raise ValueError(
@@ -136,8 +146,9 @@ def _build_port_payload(
     elif current is not None and current.flow_control is not None:
         flow_control = current.flow_control
     else:
-        # Default to Off when unknown (safer than enabling flow control)
-        flow_control = False
+        raise ValueError(
+            f"port_id={desired.port_id}: flow_control is None in desired and current settings"
+        )
 
     return {
         "portid": str(desired.port_id - 1),   # CGI uses 0-based index

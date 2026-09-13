@@ -182,7 +182,7 @@ def test_no_table_raises_parse_error() -> None:
 
 def test_empty_tbody_raises_parse_error() -> None:
     html = _STATUS_TABLE_TMPL.format(rows="")
-    with pytest.raises(JTComParseError, match="No port status table"):
+    with pytest.raises(JTComParseError, match="Zero ports"):
         parse_port_page(html)
 
 
@@ -256,3 +256,84 @@ def test_parse_actual_2500m_full() -> None:
 
 def test_parse_actual_unknown_text() -> None:
     assert _parse_actual_speed("Negotiating...") == (None, None, None)
+
+
+@pytest.mark.parametrize("admin", ["Unknown", "", "--", "disabled-ish"])
+def test_unknown_current_admin_status_is_preserved(admin: str) -> None:
+    settings, _ = parse_port_page(_make_html(("Port 1", admin, "Auto", "Link Down", "On", "Off")))
+    assert settings[0].admin_up is None
+
+
+@pytest.mark.parametrize("field", ["flow_control", "speed_duplex"])
+def test_missing_current_port_fields_are_preserved(field: str) -> None:
+    speed, flow = ("", "On") if field == "speed_duplex" else ("Auto", "Unknown")
+    settings, _ = parse_port_page(_make_html(("Port 1", "Enable", speed, "Link Down", flow, "Off")))
+    assert getattr(settings[0], field) is None
+
+
+@pytest.mark.parametrize("port", ["Port 0", "Port 2 junk", "unknown port"])
+def test_malformed_port_row_is_not_skipped(port: str) -> None:
+    html = _make_html(("Port 1", "Enable", "Auto", "Link Down", "On", "Off"),
+                      (port, "Enable", "Auto", "Link Down", "On", "Off"))
+    with pytest.raises(JTComParseError, match="port_id"):
+        parse_port_page(html)
+
+
+def test_duplicate_current_port_is_rejected() -> None:
+    row = ("Port 1", "Enable", "Auto", "Link Down", "On", "Off")
+    with pytest.raises(JTComParseError, match="duplicate"):
+        parse_port_page(_make_html(row, row))
+
+
+def test_incomplete_port_row_is_not_skipped() -> None:
+    html = _make_html(("Port 1", "Enable", "Auto", "Link Down", "On", "Off"))
+    html = html.replace('</tbody>', '<tr><td>Port 2</td></tr></tbody>')
+    with pytest.raises(JTComParseError, match="incomplete"):
+        parse_port_page(html)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_headers_resolve_reordered_groups_and_extra_columns(reverse: bool) -> None:
+    groups = [
+        ('<th rowspan="2">Port</th>', '', ['Port 3']),
+        ('<th rowspan="2">Admin Status</th>', '', ['Disable']),
+        ('<th colspan="2">Speed/Duplex</th>', '<th>Actual</th><th>Config</th>',
+         ['100M/Half', 'Auto']),
+        ('<th colspan="2">Flow Control</th>', '<th>Actual</th><th>Config</th>',
+         ['Off', 'On']),
+        ('<th rowspan="2">Firmware Counter</th>', '', ['123']),
+    ]
+    if reverse:
+        groups.reverse()
+    html = ('<table><thead><tr>' + ''.join(g[0] for g in groups)
+            + '</tr><tr>' + ''.join(g[1] for g in groups)
+            + '</tr></thead><tbody><tr>'
+            + ''.join(f'<td>{value}</td>' for g in groups for value in g[2])
+            + '</tr></tbody></table>')
+    settings, oper = parse_port_page(html)
+    assert settings == [PortSettings(3, 'Port 3', False, 'Auto', True)]
+    assert oper[0].negotiated_speed_mbps == 100
+    assert oper[0].duplex == 'half'
+
+
+@pytest.mark.parametrize('header', [
+    'Port', 'Admin Status', 'Speed/Duplex', 'Flow Control', 'Config', 'Actual',
+])
+@pytest.mark.parametrize('replacement', ['', 'Unrecognized'])
+def test_missing_or_unrecognized_required_header_rejected(header: str, replacement: str) -> None:
+    html = _make_html(('Port 1', 'Enable', 'Auto', 'Link Down', 'On', 'Off'))
+    html = html.replace(f'>{header}</th>', f'>{replacement}</th>', 1)
+    with pytest.raises(JTComParseError, match='header'):
+        parse_port_page(html)
+
+
+@pytest.mark.parametrize('header', [
+    'Port', 'Admin Status', 'Speed/Duplex Config', 'Speed/Duplex Actual',
+    'Flow Control Config', 'Flow Control Actual',
+])
+def test_duplicate_required_header_rejected(header: str) -> None:
+    html = _make_html(('Port 1', 'Enable', 'Auto', 'Link Down', 'On', 'Off'))
+    html = html.replace('<th rowspan="2">Port</th>',
+                        f'<th rowspan="2">{header}</th><th rowspan="2">Port</th>')
+    with pytest.raises(JTComParseError, match='duplicate required header'):
+        parse_port_page(html)

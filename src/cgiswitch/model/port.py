@@ -31,7 +31,7 @@ class PortSettings:
     Attributes:
         port_id: 1-based port number as reported by the switch.
         name: Human-readable port name (e.g. ``"Port 1"``).
-        admin_up: ``True`` if the port is administratively enabled.
+        admin_up: ``True`` if enabled, ``False`` if disabled, ``None`` if unknown.
         speed_duplex: Configured speed/duplex string (e.g. ``"Auto"``,
             ``"1000M/Full"``), or ``None`` if unknown.
         flow_control: ``True`` if flow control is enabled, ``None`` if unknown.
@@ -39,7 +39,7 @@ class PortSettings:
 
     port_id: int
     name: str
-    admin_up: bool
+    admin_up: bool | None
     speed_duplex: str | None = None
     flow_control: bool | None = None
 

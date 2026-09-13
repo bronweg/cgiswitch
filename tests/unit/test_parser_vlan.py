@@ -287,3 +287,92 @@ def test_port_no_status_table_raises() -> None:
     html = "<div><form id=\"vlanMenber\"><table><tr><td>x</td></tr></table></form></div>"
     with pytest.raises(JTComParseError, match="status table"):
         parse_port_vlan_settings(html)
+
+
+@pytest.mark.parametrize("filename,field,raw", [
+    ("malformed_vlan_id.html", "vlan_id", "bad-id"),
+    ("malformed_vlan_access.html", "access_vlan", "bad-access"),
+    ("malformed_vlan_native.html", "native_vlan", "bad-native"),
+    ("malformed_vlan_permit.html", "permit_vlans", "1,bad-permit"),
+    ("malformed_vlan_mode.html", "vlan_type", "Hybrid"),
+])
+def test_malformed_fixtures_report_parser_field_and_raw_value(
+    filename: str, field: str, raw: str,
+) -> None:
+    parser = parse_static_vlans if field == "vlan_id" else parse_port_vlan_settings
+    with pytest.raises(JTComParseError) as exc:
+        parser((FIXTURES / filename).read_text())
+    message = str(exc.value)
+    assert parser.__name__ in message
+    assert field in message
+    assert raw in message
+    if field != "vlan_id":
+        assert "Port 3" in message
+
+
+@pytest.mark.parametrize("value", ["", "--", "0", "4095", "-1", "1.5"])
+def test_invalid_static_vlan_ids_are_not_discarded(value: str) -> None:
+    row = _make_static_row("1", 1, 1, "default").replace('<td>1</td><td>default',
+                                                           f'<td>{value}</td><td>default')
+    with pytest.raises(JTComParseError, match="vlan_id"):
+        parse_static_vlans(_STATIC_TEMPLATE.format(rows=row))
+
+
+@pytest.mark.parametrize("value", ["", "0", "4095", "1,,10", "1__10", "1,", ",1", "1,bad"])
+def test_invalid_permit_list_is_not_partially_accepted(value: str) -> None:
+    row = _make_port_row("Port 3", "Trunk", "--", "1", value)
+    with pytest.raises(JTComParseError, match="permit_vlans") as exc:
+        parse_port_vlan_settings(_PORT_BASED_TEMPLATE.format(rows=row))
+    assert repr(value) in str(exc.value)
+
+
+@pytest.mark.parametrize("mode,access,native,permit", [
+    ("Access", "--", "--", "--"),
+    ("Access", "", "--", "--"),
+    ("Access", "4095", "--", "--"),
+    ("Access", "1", "10", "--"),
+    ("Access", "1", "--", "10"),
+    ("Trunk", "--", "--", "1"),
+    ("Trunk", "--", "", "1"),
+    ("Trunk", "--", "4095", "1"),
+    ("Trunk", "1", "1", "1"),
+])
+def test_missing_or_conflicting_mode_fields_fail(
+    mode: str, access: str, native: str, permit: str,
+) -> None:
+    row = _make_port_row("Port 3", mode, access, native, permit)
+    with pytest.raises(JTComParseError):
+        parse_port_vlan_settings(_PORT_BASED_TEMPLATE.format(rows=row))
+
+
+def test_duplicate_static_vlan_id_fails() -> None:
+    rows = _make_static_row("1", 1, 1, "default") + _make_static_row("1", 2, 1, "other")
+    with pytest.raises(JTComParseError, match="duplicate"):
+        parse_static_vlans(_STATIC_TEMPLATE.format(rows=rows))
+
+
+@pytest.mark.parametrize("name", ["Port 3", "port3"])
+def test_duplicate_vlan_port_id_fails(name: str) -> None:
+    rows = _make_port_row("Port 3", "Access", "1", "--", "--")
+    rows += _make_port_row(name, "Access", "10", "--", "--")
+    with pytest.raises(JTComParseError, match="duplicate"):
+        parse_port_vlan_settings(_PORT_BASED_TEMPLATE.format(rows=rows))
+
+
+@pytest.mark.parametrize("name", ["Port 0", "Port 3suffix", "unknown"])
+def test_malformed_vlan_port_name_fails(name: str) -> None:
+    rows = _make_port_row(name, "Access", "1", "--", "--")
+    with pytest.raises(JTComParseError, match="port_name"):
+        parse_port_vlan_settings(_PORT_BASED_TEMPLATE.format(rows=rows))
+
+
+@pytest.mark.parametrize("rows", ["", "<tr><td>incomplete</td></tr>"])
+def test_empty_or_incomplete_static_table_fails(rows: str) -> None:
+    with pytest.raises(JTComParseError):
+        parse_static_vlans(_STATIC_TEMPLATE.format(rows=rows))
+
+
+@pytest.mark.parametrize("rows", ["", "<tr><td>Port 3</td></tr>"])
+def test_empty_or_incomplete_port_vlan_table_fails(rows: str) -> None:
+    with pytest.raises(JTComParseError):
+        parse_port_vlan_settings(_PORT_BASED_TEMPLATE.format(rows=rows))

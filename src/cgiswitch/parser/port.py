@@ -43,26 +43,43 @@ def parse_port_page(
     if table is None:
         raise JTComParseError(
             "No port status table found in port.cgi response; "
-            "expected a standalone <table> with 6 data columns."
+            "expected a standalone port table with recognized headers."
         )
 
+    columns, width = _header_columns(table)
     settings_list: list[PortSettings] = []
     oper_list: list[PortOperStatus] = []
 
+    seen_ids: set[int] = set()
     for row in table.find_all("tr"):
-        cells = row.find_all("td")
-        if len(cells) < 6:
+        if row.find("th") or row.find_parent("thead"):
+            continue
+        cells = row.find_all("td", recursive=False)
+        if not cells:
             continue  # header rows or spacer rows
-        port_text = cells[0].get_text(strip=True)
-        m = _PORT_NAME_RE.match(port_text)
-        if not m:
-            continue  # not a port data row
+        if len(cells) != width:
+            raise JTComParseError(
+                f"parse_port_page field='row' raw={row.get_text()!r}: "
+                "incomplete or misaligned port row"
+            )
+        port_text = cells[columns["port"]].get_text(strip=True)
+        m = _PORT_NAME_RE.fullmatch(port_text)
+        if not m or int(m.group(1)) < 1:
+            raise JTComParseError(
+                f"parse_port_page field='port_id' raw={port_text!r}: expected positive Port N"
+            )
         port_id = int(m.group(1))
+        if port_id in seen_ids:
+            raise JTComParseError(
+                f"parse_port_page field='port_id' raw={port_text!r}: duplicate port {port_id}"
+            )
+        seen_ids.add(port_id)
 
-        admin_up = cells[1].get_text(strip=True).lower() == "enable"
-        speed_config = cells[2].get_text(strip=True) or None
-        speed_actual = cells[3].get_text(strip=True)
-        flow_text = cells[4].get_text(strip=True).lower()
+        admin_text = cells[columns["admin status"]].get_text(strip=True).lower()
+        admin_up = admin_text == "enable" if admin_text in ("enable", "disable") else None
+        speed_config = cells[columns["speed/duplex config"]].get_text(strip=True) or None
+        speed_actual = cells[columns["speed/duplex actual"]].get_text(strip=True)
+        flow_text = cells[columns["flow control config"]].get_text(strip=True).lower()
         flow_control: bool | None = (
             flow_text == "on" if flow_text in ("on", "off") else None
         )
@@ -120,22 +137,78 @@ def parse_port_settings(html: str) -> list[PortSettings]:
 # Internals
 # ---------------------------------------------------------------------------
 
-def _find_status_table(soup: BeautifulSoup) -> Tag | None:
-    """Find the port status ``<table>`` that is NOT inside a ``<form>``.
+_REQUIRED_HEADERS = (
+    "port", "admin status", "speed/duplex config", "speed/duplex actual",
+    "flow control config", "flow control actual",
+)
 
-    The status table has data rows with exactly 6 ``<td>`` cells where the
-    first cell matches the "Port N" pattern.
-    """
+
+def _find_status_table(soup: BeautifulSoup) -> Tag | None:
+    """Locate a standalone port table without relying on column positions."""
+    candidates = []
     for table in soup.find_all("table"):
         if table.find_parent("form"):
-            continue  # skip config-form tables
-        for row in table.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) >= 6 and _PORT_NAME_RE.match(
-                cells[0].get_text(strip=True)
-            ):
-                return table
-    return None
+            continue
+        labels = [cell.get_text(" ", strip=True).lower() for cell in table.find_all("th")]
+        if any(label in {"port", "admin status", "speed/duplex"} for label in labels) or any(
+            _PORT_NAME_RE.fullmatch(cell.get_text(strip=True)) for cell in table.find_all("td")
+        ):
+            candidates.append(table)
+    if len(candidates) > 1:
+        raise JTComParseError("parse_port_page: ambiguous port status tables")
+    return candidates[0] if candidates else None
+
+
+def _header_columns(table: Tag) -> tuple[dict[str, int], int]:
+    """Expand grouped HTML headers and resolve required semantic column names."""
+    rows = [row for row in table.find_all("tr") if row.find("th")]
+    grid: dict[tuple[int, int], str] = {}
+    for row_index, row in enumerate(rows):
+        column = 0
+        for cell in row.find_all("th", recursive=False):
+            while (row_index, column) in grid:
+                column += 1
+            raw = cell.get_text(" ", strip=True)
+            label = " ".join(raw.lower().split())
+            try:
+                rowspan = int(str(cell.get("rowspan", "1")))
+                colspan = int(str(cell.get("colspan", "1")))
+                if not 1 <= rowspan <= len(rows) - row_index or not 1 <= colspan <= 256:
+                    raise ValueError("invalid header span")
+            except ValueError as exc:
+                raise JTComParseError(
+                    f"parse_port_page field='header' raw={raw!r}: invalid span"
+                ) from exc
+            for r in range(row_index, row_index + rowspan):
+                for c in range(column, column + colspan):
+                    if (r, c) in grid:
+                        raise JTComParseError("parse_port_page field='header': overlapping spans")
+                    grid[r, c] = label
+            column += colspan
+    width = max((column + 1 for _, column in grid), default=0)
+    columns: dict[str, int] = {}
+    for column in range(width):
+        parts: list[str] = []
+        for row_index in range(len(rows)):
+            if (row_index, column) not in grid:
+                raise JTComParseError("parse_port_page field='header': incomplete header grid")
+            label = grid[row_index, column]
+            if not parts or label != parts[-1]:
+                parts.append(label)
+        name = " ".join(parts)
+        if name in _REQUIRED_HEADERS:
+            if name in columns:
+                raise JTComParseError(
+                    f"parse_port_page field='header' raw={name!r}: duplicate required header"
+                )
+            columns[name] = column
+    missing = sorted(set(_REQUIRED_HEADERS) - columns.keys())
+    if missing:
+        raise JTComParseError(
+            f"parse_port_page field='header' raw={list(grid.values())!r}: "
+            f"missing or unrecognized required headers: {missing}"
+        )
+    return columns, width
 
 
 def _parse_actual_speed(

@@ -14,6 +14,10 @@ class JTComError(Exception):
     """Base exception for all cgiswitch errors."""
 
 
+class JTComStateError(JTComError):
+    """Raised when parsed device pages describe inconsistent current state."""
+
+
 class JTComAuthError(JTComError):
     """Raised when authentication with the switch fails."""
 

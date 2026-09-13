@@ -143,7 +143,9 @@ def test_switch_check_mode_accepts_port_centric_vlan_input(
     switch = JTComSwitch("192.0.2.1", "admin", "admin")
     switch._session = MagicMock()
     current_vlans = {10: VlanEntry(vlan_id=10, name="v10")}
-    current_ports = [PortSettings(port_id=5, name="Port 5", admin_up=True)]
+    current_ports = [PortSettings(
+        port_id=5, name="Port 5", admin_up=True, speed_duplex="Auto", flow_control=False,
+    )]
     monkeypatch.setattr(
         switch,
         "_read_current_state",
