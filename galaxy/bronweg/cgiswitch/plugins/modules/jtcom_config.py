@@ -61,6 +61,13 @@ options:
       ports first. This is a destructive override.
     type: bool
     default: false
+  auto_create_referenced_vlans:
+    description: >
+      Create VLANs referenced by port-centric membership fields when they are
+      absent from the switch and not explicitly declared under C(vlans).
+      Disabled by default; unknown references fail validation.
+    type: bool
+    default: false
   vlans:
     description: >
       Incremental VLAN changes, keyed by VLAN ID (string or int).
@@ -81,6 +88,10 @@ options:
       canonical membership planner used for VLAN-centric syntax.
       C(access_vlan) configures a canonical untagged access port.
       C(native_vlan) + C(trunk_*) configures a canonical trunk.
+      Referenced VLANs must already exist or be declared under C(vlans:) with
+      C(state: present). Set C(auto_create_referenced_vlans: true) to create
+      unknown access/native/add/set references. Remove references never create
+      VLANs and fail when unknown.
       Set C(admin_up: false) to administratively disable a port.
       Ports not listed are untouched. Port 6 (management uplink) cannot be
       administratively disabled.
@@ -89,6 +100,9 @@ notes:
   - "Run this module on the Ansible controller (C(connection: local))."
   - cgiswitch must be installed in the Python environment used by Ansible.
   - Use C(--check) for a safe dry-run that shows planned changes without applying them.
+  - >
+    Policy violations are returned as structured C(violations) with C(blocked: true);
+    advisory conditions remain in C(warnings).
   - Untagged/native VLAN moves are blocked by default.
   - VLAN delete-in-use is blocked by default.
   - Access/trunk mode changes are blocked by default.
@@ -118,6 +132,9 @@ EXAMPLES = r"""
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
+    vlans:
+      20:
+        state: present
     ports:
       3:
         access_vlan: 20
@@ -128,6 +145,13 @@ EXAMPLES = r"""
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
+    vlans:
+      10:
+        state: present
+      20:
+        state: present
+      30:
+        state: present
     ports:
       5:
         native_vlan: 10
@@ -139,6 +163,9 @@ EXAMPLES = r"""
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
+    vlans:
+      30:
+        state: present
     ports:
       3:
         access_vlan: 30
@@ -150,6 +177,13 @@ EXAMPLES = r"""
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
+    vlans:
+      10:
+        state: present
+      20:
+        state: present
+      30:
+        state: present
     ports:
       5:
         native_vlan: 10
@@ -177,6 +211,17 @@ EXAMPLES = r"""
       61:
         tagged_add: [1, 2, 3, 4, 5]
   check_mode: true
+
+- name: Create a VLAN referenced only by a port patch
+  bronweg.cgiswitch.jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    verify_tls: false
+    auto_create_referenced_vlans: true
+    ports:
+      3:
+        access_vlan: 61
 """
 
 RETURN = r"""
@@ -201,12 +246,23 @@ applied:
   returned: always
 warnings:
   description: >
-    Structured warning objects returned by the VLAN membership policy layer.
+    Advisory warning objects for permitted risks and explicit fallback behavior.
     Common fields include C(type), C(entity), C(message), C(hint), and
     C(port_id) or C(vlan_id) when applicable. Typical warning types include
     C(untagged_move), C(vlan_delete_in_use), C(mode_none_mapped_to_vlan1),
     and C(port_mode_change).
   type: list
+  returned: always
+violations:
+  description: >
+    Structured policy violations that block an apply. In check mode these are
+    reported with C(blocked: true); in normal mode the action fails before
+    backup or writes.
+  type: list
+  returned: always
+blocked:
+  description: Whether policy violations block the requested operation.
+  type: bool
   returned: always
 """
 
@@ -224,6 +280,7 @@ def main() -> None:
             allow_port_mode_change=dict(type="bool", default=False),
             allow_untagged_move=dict(type="bool", default=False),
             allow_vlan_delete_in_use=dict(type="bool", default=False),
+            auto_create_referenced_vlans=dict(type="bool", default=False),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),

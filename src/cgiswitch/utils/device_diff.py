@@ -17,7 +17,6 @@ terms rather than JTCom backend native/permit fields.
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -66,8 +65,6 @@ class DevicePlan:
 def build_device_plan(
     current: DeviceConfig,
     desired: DeviceConfig,
-    *,
-    safety_port_id: int | None = None,
 ) -> DevicePlan:
     """Compute the minimal ordered plan from the explicit *desired* entries.
 
@@ -87,14 +84,10 @@ def build_device_plan(
 
     - Compare each non-``None`` field; emit ``port_update`` if any differs.
     - Set ``admin_up=False`` to administratively disable a port.
-    - If ``safety_port_id`` matches a disable (``admin_up=False``), the change is silently skipped.
 
     Args:
         current: Current device config (as read from the switch).
         desired: Desired incremental-change config.
-        safety_port_id: 1-based port ID that must never be disabled.  A desired
-            change that would set ``admin_up=False`` for this port is silently
-            skipped (with a warning).
 
     Returns:
         A :class:`DevicePlan` with changes in apply order.
@@ -168,13 +161,7 @@ def build_device_plan(
         field_diffs: dict[str, Any] = {}
 
         if cfg_p.admin_up is not None and cfg_p.admin_up != cur_p.admin_up:
-            if not cfg_p.admin_up and safety_port_id is not None and pid == safety_port_id:
-                warnings.warn(
-                    f"Refusing to disable safety port {pid}; skipping admin_up change.",
-                    stacklevel=2,
-                )
-            else:
-                field_diffs["admin_up"] = {"from": cur_p.admin_up, "to": cfg_p.admin_up}
+            field_diffs["admin_up"] = {"from": cur_p.admin_up, "to": cfg_p.admin_up}
 
         if cfg_p.speed_duplex is not None and cfg_p.speed_duplex != cur_p.speed_duplex:
             field_diffs["speed_duplex"] = {

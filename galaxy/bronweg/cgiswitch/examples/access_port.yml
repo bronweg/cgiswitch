@@ -16,6 +16,9 @@
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
         verify_tls: false
+        vlans:
+          20:
+            state: present
         ports:
           3:
             access_vlan: 20

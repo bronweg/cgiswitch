@@ -93,7 +93,8 @@ list are affected. Unlisted items are always left untouched.
 - Port numbering is 1-based across the entire project: switch `Port 5`,
   `PortConfig(port_id=5)`, and VLAN membership port `5` all refer to the same port.
 - VLAN 1 is protected and can never be deleted.
-- Port 6 (management uplink) can never be administratively disabled.
+- The configured safety port (port 6 by default) cannot be administratively disabled.
+  Its requested shutdown remains visible in the plan and diff, but policy blocks apply.
 - VLAN membership accepts both VLAN-centric and port-centric input. Both are
   translated into the same canonical membership engine before planning.
 
@@ -120,9 +121,25 @@ from current state or explicitly supplied in the desired configuration. Unknown
 administrative state and flow control are never replaced with guessed defaults.
 These preflight checks also run in check mode.
 
+### Referenced VLANs
+
+Port-centric `access_vlan`, `native_vlan`, `trunk_add_vlans`, and
+`trunk_set_vlans` must reference existing VLANs or VLANs explicitly declared
+with `state="present"`. Unknown references fail validation by default. Set
+`ApplyPolicy(auto_create_referenced_vlans=True)` to include their creation in
+the plan. VLAN IDs must be integers in 1..4094.
+
+A reference to a VLAN explicitly marked `state="absent"` is always a conflict.
+`trunk_remove_vlans` never creates VLANs: unknown removal targets fail validation
+even when auto-creation is enabled.
+
 ### VLAN Membership Policy
 
 Potentially destructive or ambiguous VLAN membership changes are policy-gated:
+
+- Access/trunk transitions require `allow_port_mode_change=True`.
+- Membership the backend cannot express, including tagged-only ports without
+  an untagged/native VLAN, is always blocked.
 
 - Untagged/native VLAN moves fail by default. Set `allow_untagged_move=True`
   only when moving a port from one untagged/native VLAN to another is intended.
@@ -131,11 +148,12 @@ Potentially destructive or ambiguous VLAN membership changes are policy-gated:
 - If a changed port would otherwise end up with no VLAN membership, the policy
   layer maps it explicitly to access VLAN 1 and emits a structured
   `mode_none_mapped_to_vlan1` warning. This fallback can still trigger
-  access↔trunk protection if the effective result changes port mode.
+  access/trunk protection or untagged-move protection for the effective result.
 
-### Warning Objects
+### Policy Results
 
-Write operations return structured warning objects. Common fields:
+Policy validation runs identically in check mode and real apply. `warnings` are
+advisory; `violations` are blocking. Both use structured records with common fields:
 
 - `type`
 - `entity`
@@ -143,12 +161,17 @@ Write operations return structured warning objects. Common fields:
 - `port_id` or `vlan_id` when applicable
 - `hint`
 
-Common warning types:
+Risk records include:
 
 - `untagged_move`
 - `vlan_delete_in_use`
 - `mode_none_mapped_to_vlan1`
 - `port_mode_change`
+- `safety_port_shutdown` (violation only)
+- `unsupported_vlan_port_mode` (violation only)
+
+Override flags move the corresponding permitted risk records into `warnings`.
+Safety-port and unsupported-membership violations are not bypassed by those flags.
 
 ---
 
@@ -190,6 +213,7 @@ with JTComSwitch(
             vlans={
                 100: VlanConfig(vlan_id=100, name="Servers", state="present"),
                 200: VlanConfig(vlan_id=200, name="Voice", state="present"),
+                300: VlanConfig(vlan_id=300, name="Storage", state="present"),
             },
             ports={
                 1: PortConfig(
@@ -227,13 +251,33 @@ with JTComSwitch(
     policy=policy,
 ) as switch:
     result = switch.apply(desired, check_mode=True)
-    print(result["warnings"])
+    print(result["warnings"], result["violations"])
 ```
 
 ### Dry-Run Example
 
 Use `switch.apply(desired, check_mode=True)` for a dry run. It returns planned
-diffs and structured warnings without writing to the device.
+diffs, advisory `warnings`, structured `violations`, and `blocked` without backup
+or device writes. A forbidden change still has `changed=True` when the requested
+plan differs from current state:
+
+```yaml
+changed: true
+blocked: true
+violations:
+  - type: safety_port_shutdown
+    entity: port
+    port_id: 6
+    vlan_id: null
+    message: Port 6 is the safety port and cannot be disabled.
+    hint: Select a different safety_port_id only after securing management access.
+backup_file: ""
+applied: []
+```
+
+The same real apply raises `JTComPolicyError` before backup or any write; inspect
+`exc.violations` for the same records. Import it from `cgiswitch`. Validation
+errors such as unknown VLAN references still raise `ValueError` in both modes.
 
 Runnable scripts in [`examples/`](examples):
 - [`examples/read_device_info.py`](examples/read_device_info.py)

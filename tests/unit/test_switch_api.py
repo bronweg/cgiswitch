@@ -98,7 +98,7 @@ def test_apply_uses_constructor_policy_for_membership_planning(
         policy_arg = kwargs["policy"]
         assert isinstance(policy_arg, ApplyPolicy)
         seen.append(policy_arg)
-        return MagicMock(changed_ports=[], warnings=[])
+        return MagicMock(changed_ports=[], changed_vlans=[], warnings=[], violations=[])
 
     monkeypatch.setattr(switch, "_plan_vlan_membership", plan)
     result = switch.apply(DeviceConfig(), check_mode=True)
@@ -106,7 +106,7 @@ def test_apply_uses_constructor_policy_for_membership_planning(
     assert result["changed"] is False
     assert switch.policy is policy
     assert seen == [policy]
-    assert build_plan.call_args.kwargs["safety_port_id"] == 7
+    assert build_plan.call_args.kwargs == {}
 
 
 def test_apply_rejects_policy_keyword_before_reads_or_writes() -> None:

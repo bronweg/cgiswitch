@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 # Switch JSON response codes
 CODE_OK: int = 0
@@ -12,6 +13,20 @@ CODE_AUTH_EXPIRED: int = 11
 
 class JTComError(Exception):
     """Base exception for all cgiswitch errors."""
+
+
+class JTComPolicyError(JTComError):
+    """Raised before backup or writes when a plan violates apply policy.
+
+    ``violations`` contains the same structured records returned by check mode.
+    """
+
+    def __init__(self, violations: list[dict[str, Any]]) -> None:
+        self.violations = violations
+        self.blocked = True
+        super().__init__("Apply blocked by policy: " + "; ".join(
+            violation["message"] for violation in violations
+        ))
 
 
 class JTComStateError(JTComError):

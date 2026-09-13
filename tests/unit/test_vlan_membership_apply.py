@@ -18,10 +18,7 @@ from cgiswitch.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
 from cgiswitch.switch import JTComSwitch
 from cgiswitch.utils.vlan_membership import (
     PortMembershipMap,
-    VlanDeleteInUseError,
-    VlanMembershipModeChangeError,
     VlanMembershipPlan,
-    VlanMembershipUntaggedMoveError,
     build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
     canonical_to_jtcom_port_vlan_state,
@@ -74,7 +71,6 @@ def test_tagged_set_replaces_vlan_dimension_only() -> None:
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=40, tagged_set=[5])],
-        check_mode=True,
     )
     assert plan.desired_per_port[5]["tagged_vlans"] == {10, 20, 30, 40}
     assert plan.desired_per_port[6]["tagged_vlans"] == set()
@@ -95,7 +91,6 @@ def test_untagged_remove_clears_native_if_matching() -> None:
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=20, untagged_remove=[3])],
-        check_mode=True,
     )
     assert_common_warning_fields(plan.warnings[0], type_="mode_none_mapped_to_vlan1", entity="port")
     assert plan.desired_per_port[3]["untagged_vlan"] == 1
@@ -113,33 +108,45 @@ def test_tagged_untagged_same_vlan_is_auto_normalized() -> None:
     assert plan.desired_per_port[3]["tagged_vlans"] == set()
 
 
-def test_access_to_trunk_fails_by_default() -> None:
+def test_tagged_only_changed_state_is_an_unsupported_violation() -> None:
+    current = {3: make_port_state()}
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=30, tagged_add=[3])],
+        allow_port_mode_change=True,
+    )
+    assert plan.changed_ports == [3]
+    assert [violation["type"] for violation in plan.violations] == [
+        "unsupported_vlan_port_mode",
+    ]
+    assert plan.violations[0]["desired_mode"] == "trunk"
+
+
+def test_access_to_trunk_is_a_violation_by_default() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
-    with pytest.raises(VlanMembershipModeChangeError) as exc_info:
-        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, tagged_add=[3])])
+    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, tagged_add=[3])])
     assert_common_warning_fields(
-        exc_info.value.warnings[0],
+        plan.violations[0],
         type_="port_mode_change",
         entity="port",
     )
-    assert exc_info.value.warnings[0]["port_id"] == 3
-    assert exc_info.value.warnings[0]["vlan_id"] is None
-    assert exc_info.value.warnings[0]["current_mode"] == "access"
-    assert exc_info.value.warnings[0]["desired_mode"] == "trunk"
-    assert "allow_port_mode_change=true" in str(exc_info.value)
+    assert plan.violations[0]["port_id"] == 3
+    assert plan.violations[0]["vlan_id"] is None
+    assert plan.violations[0]["current_mode"] == "access"
+    assert plan.violations[0]["desired_mode"] == "trunk"
+    assert "allow_port_mode_change=true" in plan.violations[0]["hint"]
 
 
-def test_trunk_to_access_fails_by_default() -> None:
+def test_trunk_to_access_is_a_violation_by_default() -> None:
     current = {5: make_port_state(untagged_vlan=10, tagged_vlans={20, 30})}
     desired = [
         VlanConfig(vlan_id=20, tagged_remove=[5]),
         VlanConfig(vlan_id=30, tagged_remove=[5]),
     ]
-    with pytest.raises(VlanMembershipModeChangeError) as exc_info:
-        plan_vlan_membership_changes(current, desired)
-    assert exc_info.value.warnings[0]["port_id"] == 5
-    assert exc_info.value.warnings[0]["current_mode"] == "trunk"
-    assert exc_info.value.warnings[0]["desired_mode"] == "access"
+    plan = plan_vlan_membership_changes(current, desired)
+    assert plan.violations[0]["port_id"] == 5
+    assert plan.violations[0]["current_mode"] == "trunk"
+    assert plan.violations[0]["desired_mode"] == "access"
 
 
 def test_access_to_trunk_allowed_with_flag() -> None:
@@ -154,16 +161,45 @@ def test_access_to_trunk_allowed_with_flag() -> None:
     assert plan.warnings[0]["desired_mode"] == "trunk"
 
 
-def test_check_mode_warns_instead_of_failing_on_mode_change() -> None:
+def test_mode_change_is_a_violation_without_override() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=30, tagged_add=[3])],
-        check_mode=True,
     )
-    assert_common_warning_fields(plan.warnings[0], type_="port_mode_change", entity="port")
-    assert plan.warnings[0]["port_id"] == 3
-    assert "allow_port_mode_change=true" in plan.warnings[0]["hint"]
+    assert_common_warning_fields(plan.violations[0], type_="port_mode_change", entity="port")
+    assert plan.violations[0]["port_id"] == 3
+    assert "allow_port_mode_change=true" in plan.violations[0]["hint"]
+
+
+def test_policy_violations_are_aggregated_and_overrides_are_independent() -> None:
+    current = {3: make_port_state(untagged_vlan=20)}
+    configs = [
+        VlanConfig(vlan_id=30, untagged_add=[3]),
+        VlanConfig(vlan_id=40, tagged_add=[3]),
+    ]
+
+    plan = plan_vlan_membership_changes(current, configs)
+    assert [item["type"] for item in plan.violations] == [
+        "untagged_move",
+        "port_mode_change",
+    ]
+
+    mode_allowed = plan_vlan_membership_changes(
+        current,
+        configs,
+        allow_port_mode_change=True,
+    )
+    assert [item["type"] for item in mode_allowed.violations] == ["untagged_move"]
+    assert [item["type"] for item in mode_allowed.warnings] == ["port_mode_change"]
+
+    move_allowed = plan_vlan_membership_changes(
+        current,
+        configs,
+        allow_untagged_move=True,
+    )
+    assert [item["type"] for item in move_allowed.violations] == ["port_mode_change"]
+    assert [item["type"] for item in move_allowed.warnings] == ["untagged_move"]
 
 
 def test_omitted_legacy_fields_are_noop_not_empty_replacement() -> None:
@@ -386,7 +422,6 @@ def test_check_mode_warns_instead_of_failing_on_desired_mode_none() -> None:
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=20, untagged_remove=[3])],
-        check_mode=True,
     )
     assert_common_warning_fields(plan.warnings[0], type_="mode_none_mapped_to_vlan1", entity="port")
     assert plan.desired_per_port[3] == make_port_state(untagged_vlan=1)
@@ -444,30 +479,28 @@ def test_apply_mode_none_maps_to_vlan1_before_apply(
     session.download_config_backup.assert_not_called()
 
 
-def test_untagged_move_apply_fails_by_default() -> None:
+def test_untagged_move_is_a_violation_by_default() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
-    with pytest.raises(VlanMembershipUntaggedMoveError) as exc_info:
-        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, untagged_add=[3])])
+    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, untagged_add=[3])])
     assert_common_warning_fields(
-        exc_info.value.warnings[0],
+        plan.violations[0],
         type_="untagged_move",
         entity="port",
     )
-    assert exc_info.value.warnings[0]["type"] == "untagged_move"
-    assert exc_info.value.warnings[0]["vlan_id"] is None
-    assert exc_info.value.warnings[0]["current_untagged_vlan"] == 20
-    assert exc_info.value.warnings[0]["desired_untagged_vlan"] == 30
+    assert plan.violations[0]["type"] == "untagged_move"
+    assert plan.violations[0]["vlan_id"] is None
+    assert plan.violations[0]["current_untagged_vlan"] == 20
+    assert plan.violations[0]["desired_untagged_vlan"] == 30
 
 
-def test_untagged_move_check_mode_warns() -> None:
+def test_untagged_move_is_a_violation_without_override() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=30, untagged_add=[3])],
-        check_mode=True,
     )
-    assert_common_warning_fields(plan.warnings[0], type_="untagged_move", entity="port")
-    assert plan.warnings[0]["type"] == "untagged_move"
+    assert_common_warning_fields(plan.violations[0], type_="untagged_move", entity="port")
+    assert plan.violations[0]["type"] == "untagged_move"
     assert plan.desired_per_port[3]["untagged_vlan"] == 30
 
 
@@ -484,34 +517,32 @@ def test_untagged_move_allowed_with_flag() -> None:
 
 def test_native_vlan_move_on_trunk_fails_by_default() -> None:
     current = {5: make_port_state(untagged_vlan=10, tagged_vlans={20})}
-    with pytest.raises(VlanMembershipUntaggedMoveError):
-        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, untagged_add=[5])])
+    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, untagged_add=[5])])
+    assert plan.violations[0]["type"] == "untagged_move"
 
 
-def test_delete_vlan_in_use_fails_by_default() -> None:
+def test_delete_vlan_in_use_is_a_violation_by_default() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
-    with pytest.raises(VlanDeleteInUseError) as exc_info:
-        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, state="absent")])
+    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, state="absent")])
     assert_common_warning_fields(
-        exc_info.value.warnings[0],
+        plan.violations[0],
         type_="vlan_delete_in_use",
         entity="vlan",
     )
-    assert exc_info.value.warnings[0]["type"] == "vlan_delete_in_use"
-    assert exc_info.value.warnings[0]["port_id"] is None
-    assert exc_info.value.warnings[0]["vlan_id"] == 20
-    assert exc_info.value.warnings[0]["affected_ports_untagged"] == [3]
+    assert plan.violations[0]["type"] == "vlan_delete_in_use"
+    assert plan.violations[0]["port_id"] is None
+    assert plan.violations[0]["vlan_id"] == 20
+    assert plan.violations[0]["affected_ports_untagged"] == [3]
 
 
-def test_delete_vlan_in_use_check_mode_warns() -> None:
+def test_delete_vlan_in_use_is_a_violation_without_override() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=20, state="absent")],
-        check_mode=True,
     )
-    assert_common_warning_fields(plan.warnings[0], type_="vlan_delete_in_use", entity="vlan")
-    assert plan.warnings[0]["type"] == "vlan_delete_in_use"
+    assert_common_warning_fields(plan.violations[0], type_="vlan_delete_in_use", entity="vlan")
+    assert plan.violations[0]["type"] == "vlan_delete_in_use"
     assert plan.changed_ports == []
 
 
@@ -524,7 +555,6 @@ def test_allow_vlan_delete_in_use_detaches_and_falls_back_to_vlan1() -> None:
         current,
         [VlanConfig(vlan_id=20, state="absent")],
         allow_vlan_delete_in_use=True,
-        check_mode=True,
     )
     assert_common_warning_fields(plan.warnings[0], type_="vlan_delete_in_use", entity="vlan")
     assert_common_warning_fields(plan.warnings[1], type_="mode_none_mapped_to_vlan1", entity="port")
@@ -556,7 +586,6 @@ def test_allow_vlan_delete_in_use_preserves_tagged_set_style_result() -> None:
             VlanConfig(vlan_id=30, tagged_set=[5]),
         ],
         allow_vlan_delete_in_use=True,
-        check_mode=True,
     )
     assert plan.desired_per_port[5]["untagged_vlan"] == 10
     assert plan.desired_per_port[5]["tagged_vlans"] == {30}
@@ -565,8 +594,8 @@ def test_allow_vlan_delete_in_use_preserves_tagged_set_style_result() -> None:
     assert plan.changed_ports == [5, 6]
     assert [warning["type"] for warning in plan.warnings] == [
         "vlan_delete_in_use",
-        "port_mode_change",
     ]
+    assert [violation["type"] for violation in plan.violations] == ["port_mode_change"]
 
 
 def test_allow_vlan_delete_in_use_preserves_untagged_set_style_result() -> None:
@@ -579,7 +608,6 @@ def test_allow_vlan_delete_in_use_preserves_untagged_set_style_result() -> None:
         ],
         allow_vlan_delete_in_use=True,
         allow_untagged_move=True,
-        check_mode=True,
     )
     assert plan.desired_per_port[5]["untagged_vlan"] == 30
     assert plan.desired_per_port[5]["tagged_vlans"] == set()
@@ -589,10 +617,9 @@ def test_allow_vlan_delete_in_use_preserves_untagged_set_style_result() -> None:
 
 def test_mode_none_fallback_still_respects_trunk_to_access_protection() -> None:
     current = {5: make_port_state(tagged_vlans={20})}
-    with pytest.raises(VlanMembershipModeChangeError) as exc_info:
-        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, tagged_remove=[5])])
-    assert exc_info.value.warnings[0]["current_mode"] == "trunk"
-    assert exc_info.value.warnings[0]["desired_mode"] == "access"
+    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, tagged_remove=[5])])
+    assert plan.violations[0]["current_mode"] == "trunk"
+    assert plan.violations[0]["desired_mode"] == "access"
 
 
 def test_mode_none_fallback_check_mode_warns_on_trunk_to_access_transition() -> None:
@@ -600,12 +627,9 @@ def test_mode_none_fallback_check_mode_warns_on_trunk_to_access_transition() -> 
     plan = plan_vlan_membership_changes(
         current,
         [VlanConfig(vlan_id=20, tagged_remove=[5])],
-        check_mode=True,
     )
-    assert [warning["type"] for warning in plan.warnings] == [
-        "mode_none_mapped_to_vlan1",
-        "port_mode_change",
-    ]
+    assert [warning["type"] for warning in plan.warnings] == ["mode_none_mapped_to_vlan1"]
+    assert [violation["type"] for violation in plan.violations] == ["port_mode_change"]
     assert plan.desired_per_port[5]["untagged_vlan"] == 1
     assert canonical_to_jtcom_port_vlan_state(plan.desired_per_port[5])["mode"] == "access"
 

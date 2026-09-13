@@ -17,6 +17,9 @@
         password: "{{ switch_pass }}"
         verify_tls: false
         allow_untagged_move: true
+        vlans:
+          30:
+            state: present
         ports:
           3:
             access_vlan: 30

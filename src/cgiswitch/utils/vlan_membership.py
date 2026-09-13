@@ -29,7 +29,7 @@ Architecture summary:
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, TypedDict
 
@@ -78,67 +78,6 @@ _NONE_MODE_HINT = (
 )
 
 
-class VlanMembershipModeChangeError(ValueError):
-    """Raised when a dangerous access/trunk mode change is blocked."""
-
-    def __init__(self, warnings: list[dict[str, Any]]) -> None:
-        self.warnings = warnings
-        details = "; ".join(
-            (
-                f"port_id={w['port_id']} current_mode={w['current_mode']} "
-                f"desired_mode={w['desired_mode']}"
-            )
-            for w in warnings
-        )
-        super().__init__(f"VLAN port mode change blocked: {details}. {_MODE_CHANGE_HINT}")
-
-
-class VlanMembershipUnsupportedModeError(ValueError):
-    """Raised when the desired VLAN membership cannot be represented on JTCom CGI."""
-
-    def __init__(self, warnings: list[dict[str, Any]]) -> None:
-        self.warnings = warnings
-        details = "; ".join(
-            (
-                f"port_id={w['port_id']} desired_state={w['desired_state']} "
-                f"hint={w['hint']}"
-            )
-            for w in warnings
-        )
-        super().__init__(f"Unsupported VLAN port mode requested: {details}")
-
-
-class VlanMembershipUntaggedMoveError(ValueError):
-    """Raised when an untagged/native VLAN move is blocked by policy."""
-
-    def __init__(self, warnings: list[dict[str, Any]]) -> None:
-        self.warnings = warnings
-        details = "; ".join(
-            (
-                f"port_id={w['port_id']} current_untagged_vlan={w['current_untagged_vlan']} "
-                f"desired_untagged_vlan={w['desired_untagged_vlan']}"
-            )
-            for w in warnings
-        )
-        super().__init__(f"Untagged/native VLAN move blocked: {details}. {_UNTAGGED_MOVE_HINT}")
-
-
-class VlanDeleteInUseError(ValueError):
-    """Raised when deleting a VLAN that is still referenced by ports is blocked."""
-
-    def __init__(self, warnings: list[dict[str, Any]]) -> None:
-        self.warnings = warnings
-        details = "; ".join(
-            (
-                f"vlan_id={w['vlan_id']} tagged={w['affected_ports_tagged']} "
-                f"untagged={w['affected_ports_untagged']}"
-            )
-            for w in warnings
-        )
-        super().__init__(f"VLAN delete blocked because VLAN is still in use: {details}. "
-                         f"{_VLAN_DELETE_IN_USE_HINT}")
-
-
 @dataclass
 class VlanMembershipPlan:
     """Computed VLAN membership plan.
@@ -152,7 +91,8 @@ class VlanMembershipPlan:
     desired_per_port: PortMembershipMap
     changed_ports: list[int]
     changed_vlans: list[int]
-    warnings: list[dict[str, Any]]
+    warnings: list[dict[str, Any]] = field(default_factory=list)
+    violations: list[dict[str, Any]] = field(default_factory=list)
 
 
 def make_port_state(
@@ -443,7 +383,6 @@ def plan_vlan_membership_changes(
     allow_port_mode_change: bool = False,
     allow_untagged_move: bool = False,
     allow_vlan_delete_in_use: bool = False,
-    check_mode: bool = False,
 ) -> VlanMembershipPlan:
     """Apply VLAN membership operations in memory and produce a canonical plan.
 
@@ -463,34 +402,31 @@ def plan_vlan_membership_changes(
 
     normalize_tagged_untagged_consistency(desired)
     delete_in_use_warnings = detect_vlan_delete_in_use_warnings(desired, configs)
-    if delete_in_use_warnings and not allow_vlan_delete_in_use and not check_mode:
-        raise VlanDeleteInUseError(delete_in_use_warnings)
     if allow_vlan_delete_in_use:
         for warning in delete_in_use_warnings:
             _detach_vlan(desired, int(warning["vlan_id"]))
-
-    untagged_move_warnings = detect_untagged_move_warnings(current, desired)
-    if untagged_move_warnings and not allow_untagged_move and not check_mode:
-        raise VlanMembershipUntaggedMoveError(untagged_move_warnings)
 
     # Step 4 policy operates only on canonical desired_per_port.
     # Backend-specific JTCom state is compiled later at the write boundary.
     mode_none_warnings = apply_mode_none_fallback(desired, changed_ports(current, desired))
     changed = changed_ports(current, desired)
+    # Evaluate moves after the fallback has resolved empty membership to VLAN 1.
+    # Policy must describe the effective desired state that would be applied.
+    untagged_move_warnings = detect_untagged_move_warnings(current, desired)
     mode_change_warnings = detect_mode_change_warnings(current, desired)
     unsupported_mode_warnings = detect_unsupported_mode_warnings(desired, changed)
-    warnings = (
-        delete_in_use_warnings
-        + untagged_move_warnings
-        + mode_none_warnings
-        + mode_change_warnings
+    violations = (
+        ([] if allow_vlan_delete_in_use else delete_in_use_warnings)
+        + ([] if allow_untagged_move else untagged_move_warnings)
+        + ([] if allow_port_mode_change else mode_change_warnings)
         + unsupported_mode_warnings
     )
-
-    if unsupported_mode_warnings and not check_mode:
-        raise VlanMembershipUnsupportedModeError(unsupported_mode_warnings)
-    if mode_change_warnings and not allow_port_mode_change and not check_mode:
-        raise VlanMembershipModeChangeError(mode_change_warnings)
+    warnings = (
+        (delete_in_use_warnings if allow_vlan_delete_in_use else [])
+        + (untagged_move_warnings if allow_untagged_move else [])
+        + mode_none_warnings
+        + (mode_change_warnings if allow_port_mode_change else [])
+    )
 
     return VlanMembershipPlan(
         current_per_port=current,
@@ -498,6 +434,7 @@ def plan_vlan_membership_changes(
         changed_ports=changed,
         changed_vlans=changed_vlans(current, desired),
         warnings=warnings,
+        violations=violations,
     )
 
 
@@ -658,7 +595,12 @@ def detect_unsupported_mode_warnings(
     warnings: list[dict[str, Any]] = []
     for port_id in sorted(changed_port_ids):
         desired_state = desired_per_port[port_id]
-        if classify_port_mode(desired_state) == "none":
+        # JTCom requires an untagged/native VLAN for both access and trunk
+        # representations. A tagged-only canonical state cannot be compiled.
+        if classify_port_mode(desired_state) == "none" or (
+            _untagged_vlan(desired_state) is None and _tagged_vlans(desired_state)
+        ):
+            desired_mode = classify_port_mode(desired_state)
             warnings.append(
                 {
                     "type": "unsupported_vlan_port_mode",
@@ -667,11 +609,11 @@ def detect_unsupported_mode_warnings(
                     "vlan_id": None,
                     "message": (
                         f"Port {port_id} resolved to unsupported VLAN mode "
-                        "'none'."
+                        f"'{desired_mode}'."
                     ),
-                    "desired_mode": "none",
+                    "desired_mode": desired_mode,
                     "desired_state": serialize_port_state(desired_state),
-                    "hint": _NONE_MODE_HINT,
+                    "hint": "JTCom requires an explicit untagged/native VLAN on each port.",
                 }
             )
     return warnings

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cgiswitch.client.errors import JTComPolicyError
 from cgiswitch.model.config import DeviceConfig
 from cgiswitch.model.options import ApplyPolicy
 from cgiswitch.model.port import PortConfig, PortSettings
@@ -36,6 +37,9 @@ def test_port_config_validates_vlan_ids() -> None:
     with pytest.raises(ValueError, match="trunk_set_vlans cannot be combined"):
         PortConfig(port_id=5, trunk_set_vlans=[10], trunk_add_vlans=[20])
 
+    with pytest.raises(ValueError, match="access_vlan"):
+        PortConfig(port_id=5, access_vlan=True)  # type: ignore[arg-type]
+
 
 def test_access_and_native_vlan_can_coexist_with_trunk_lists() -> None:
     cfg = PortConfig(
@@ -61,6 +65,8 @@ def test_port_only_input_translates_to_vlan_ops() -> None:
                 trunk_remove_vlans=[30],
             )
         },
+        known_vlan_ids={30},
+        auto_create_referenced_vlans=True,
     )
 
     assert merged[10].untagged_add == [5]
@@ -73,6 +79,8 @@ def test_trunk_set_uses_current_tagged_membership() -> None:
         {5: make_port_state(tagged_vlans={10, 20, 30})},
         {},
         {5: PortConfig(port_id=5, trunk_set_vlans=[20, 40])},
+        known_vlan_ids={10, 20, 30},
+        auto_create_referenced_vlans=True,
     )
 
     assert merged[10].tagged_remove == [5]
@@ -89,11 +97,83 @@ def test_vlan_only_input_is_unchanged() -> None:
     assert desired[20].tagged_add == [5]
 
 
+def test_unknown_port_vlan_reference_requires_auto_create() -> None:
+    with pytest.raises(ValueError, match="unknown VLAN 20"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {},
+            {5: PortConfig(port_id=5, access_vlan=20)},
+        )
+
+
+def test_auto_create_adds_unknown_port_vlan_reference() -> None:
+    merged = merge_port_vlan_membership_inputs(
+        {5: make_port_state()},
+        {},
+        {5: PortConfig(port_id=5, access_vlan=20)},
+        auto_create_referenced_vlans=True,
+    )
+
+    assert merged[20].untagged_add == [5]
+
+
+def test_explicit_present_vlan_does_not_require_auto_create() -> None:
+    merged = merge_port_vlan_membership_inputs(
+        {5: make_port_state()},
+        {20: VlanConfig(vlan_id=20)},
+        {5: PortConfig(port_id=5, access_vlan=20)},
+    )
+
+    assert merged[20].untagged_add == [5]
+
+
+def test_unknown_trunk_remove_never_auto_creates() -> None:
+    with pytest.raises(ValueError, match="unknown VLAN 20"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {},
+            {5: PortConfig(port_id=5, trunk_remove_vlans=[20])},
+            auto_create_referenced_vlans=True,
+        )
+
+
+def test_unknown_remove_is_checked_against_switch_state_before_auto_created_add() -> None:
+    with pytest.raises(ValueError, match="unknown VLAN 20"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {},
+            {
+                1: PortConfig(port_id=1, trunk_add_vlans=[20]),
+                2: PortConfig(port_id=2, trunk_remove_vlans=[20]),
+            },
+            auto_create_referenced_vlans=True,
+        )
+
+
+def test_port_vlan_reference_conflicts_with_explicit_absent() -> None:
+    with pytest.raises(DualSyntaxConflictError, match="marks it absent"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {20: VlanConfig(vlan_id=20, state="absent")},
+            {5: PortConfig(port_id=5, access_vlan=20)},
+        )
+
+
+def test_vlan_map_key_must_match_config_id() -> None:
+    with pytest.raises(ValueError, match="does not match VlanConfig.vlan_id"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {20: VlanConfig(vlan_id=30)},
+            {},
+        )
+
+
 def test_compatible_vlan_and_port_inputs_are_merged() -> None:
     merged = merge_port_vlan_membership_inputs(
         {5: make_port_state()},
         {20: VlanConfig(vlan_id=20, tagged_add=[5])},
         {5: PortConfig(port_id=5, native_vlan=10, trunk_add_vlans=[30])},
+        auto_create_referenced_vlans=True,
     )
 
     assert merged[10].untagged_add == [5]
@@ -107,6 +187,7 @@ def test_untagged_dual_syntax_conflict_fails() -> None:
             {5: make_port_state()},
             {10: VlanConfig(vlan_id=10, untagged_add=[5])},
             {5: PortConfig(port_id=5, access_vlan=20)},
+            auto_create_referenced_vlans=True,
         )
 
 
@@ -116,6 +197,7 @@ def test_tagged_dual_syntax_add_remove_conflict_fails() -> None:
             {5: make_port_state(tagged_vlans={20})},
             {20: VlanConfig(vlan_id=20, tagged_add=[5])},
             {5: PortConfig(port_id=5, trunk_remove_vlans=[20])},
+            known_vlan_ids={20},
         )
 
 
@@ -125,6 +207,7 @@ def test_untagged_dual_syntax_add_remove_conflict_fails() -> None:
             {5: make_port_state(untagged_vlan=10)},
             {10: VlanConfig(vlan_id=10, untagged_remove=[5])},
             {5: PortConfig(port_id=5, access_vlan=10)},
+            known_vlan_ids={10},
         )
 
 
@@ -134,13 +217,20 @@ def test_trunk_set_conflicts_with_vlan_centric_tagged_ops_for_same_port() -> Non
             {5: make_port_state(tagged_vlans={20})},
             {30: VlanConfig(vlan_id=30, tagged_add=[5])},
             {5: PortConfig(port_id=5, trunk_set_vlans=[20, 40])},
+            known_vlan_ids={20},
+            auto_create_referenced_vlans=True,
         )
 
 
 def test_switch_check_mode_accepts_port_centric_vlan_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    switch = JTComSwitch("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch(
+        "192.0.2.1",
+        "admin",
+        "admin",
+        policy=ApplyPolicy(auto_create_referenced_vlans=True),
+    )
     switch._session = MagicMock()
     current_vlans = {10: VlanEntry(vlan_id=10, name="v10")}
     current_ports = [PortSettings(
@@ -246,7 +336,7 @@ def test_port_centric_untagged_move_fails_by_default(
         lambda _session: (current_vlans, current_ports),
     )
 
-    with pytest.raises(ValueError, match="Untagged/native VLAN move blocked"):
+    with pytest.raises(JTComPolicyError, match="would move untagged VLAN"):
         switch.apply(
             DeviceConfig(ports={5: PortConfig(port_id=5, access_vlan=30)})
         )

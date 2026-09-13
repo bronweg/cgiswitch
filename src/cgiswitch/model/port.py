@@ -9,7 +9,7 @@ def _validate_vlan_id(vlan_id: int | None, field_name: str) -> None:
     """Validate an optional 802.1Q VLAN ID."""
     if vlan_id is None:
         return
-    if not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+    if isinstance(vlan_id, bool) or not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
         raise ValueError(f"{field_name} must be 1-4094, got {vlan_id}")
 
 
@@ -18,7 +18,7 @@ def _validate_vlan_list(vlan_list: list[int] | None, field_name: str) -> None:
     if vlan_list is None:
         return
     for vlan_id in vlan_list:
-        if not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+        if isinstance(vlan_id, bool) or not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
             raise ValueError(
                 f"Invalid VLAN '{vlan_id}' in '{field_name}'. VLAN IDs must be 1-4094."
             )

@@ -8,6 +8,7 @@ policy evaluation.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from typing import Literal
 
@@ -27,6 +28,9 @@ def merge_port_vlan_membership_inputs(
     current_per_port: PortMembershipMap,
     desired_vlans: dict[int, VlanConfig],
     desired_ports: dict[int, PortConfig],
+    *,
+    known_vlan_ids: Iterable[int] = (),
+    auto_create_referenced_vlans: bool = False,
 ) -> dict[int, VlanConfig]:
     """Return VLAN-centric configs with port-centric membership inputs merged.
 
@@ -36,6 +40,12 @@ def merge_port_vlan_membership_inputs(
     those operations are handed to the canonical membership planner.
     """
     result = {vid: _clone_vlan_config(cfg) for vid, cfg in sorted(desired_vlans.items())}
+    _validate_vlan_config_keys(result)
+    existing_known = set(known_vlan_ids) | {
+        vlan_id for vlan_id, cfg in result.items() if cfg.state == "present"
+    }
+    _validate_vlan_ids(existing_known, "known_vlan_ids")
+    known = set(existing_known)
     tracker = _ConflictTracker()
 
     for cfg in result.values():
@@ -47,26 +57,88 @@ def merge_port_vlan_membership_inputs(
         port_id = port.port_id
 
         if port.access_vlan is not None:
+            _prepare_referenced_vlan(
+                result, known, port.access_vlan, auto_create_referenced_vlans, "port.access_vlan"
+            )
             tracker.record_untagged(port_id, port.access_vlan, "port.access_vlan")
             _merge_port_op(result, port.access_vlan, "untagged", "add", port_id)
 
         if port.native_vlan is not None:
+            _prepare_referenced_vlan(
+                result, known, port.native_vlan, auto_create_referenced_vlans, "port.native_vlan"
+            )
             tracker.record_untagged(port_id, port.native_vlan, "port.native_vlan")
             _merge_port_op(result, port.native_vlan, "untagged", "add", port_id)
 
         for vlan_id in port.trunk_add_vlans or []:
+            _prepare_referenced_vlan(
+                result, known, vlan_id, auto_create_referenced_vlans, "port.trunk_add_vlans"
+            )
             tracker.record_tagged(port_id, vlan_id, "add", "port.trunk_add_vlans")
             _merge_port_op(result, vlan_id, "tagged", "add", port_id)
 
         for vlan_id in port.trunk_remove_vlans or []:
+            _prepare_referenced_vlan(
+                result, existing_known, vlan_id, False, "port.trunk_remove_vlans"
+            )
             tracker.record_tagged(port_id, vlan_id, "remove", "port.trunk_remove_vlans")
             _merge_port_op(result, vlan_id, "tagged", "remove", port_id)
 
         if port.trunk_set_vlans is not None:
+            for vlan_id in port.trunk_set_vlans:
+                _prepare_referenced_vlan(
+                    result,
+                    known,
+                    vlan_id,
+                    auto_create_referenced_vlans,
+                    "port.trunk_set_vlans",
+                )
             tracker.record_trunk_set(port_id, set(port.trunk_set_vlans))
             _merge_trunk_set_ops(result, current_per_port, tracker, port_id, port.trunk_set_vlans)
 
     return result
+
+
+def _validate_vlan_config_keys(vlans: dict[int, VlanConfig]) -> None:
+    for key, cfg in vlans.items():
+        if isinstance(key, bool) or not isinstance(key, int) or not 1 <= key <= 4094:
+            raise ValueError(f"desired.vlans key must be 1-4094, got {key!r}")
+        if cfg.vlan_id != key:
+            raise ValueError(
+                f"desired.vlans key {key} does not match VlanConfig.vlan_id {cfg.vlan_id}"
+            )
+
+
+def _validate_vlan_ids(vlan_ids: Iterable[int], field: str) -> None:
+    for vlan_id in vlan_ids:
+        if isinstance(vlan_id, bool) or not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+            raise ValueError(f"{field} contains invalid VLAN ID {vlan_id!r}; expected 1-4094")
+
+
+def _prepare_referenced_vlan(
+    result: dict[int, VlanConfig],
+    known: set[int],
+    vlan_id: int,
+    auto_create: bool,
+    source: str,
+) -> None:
+    _validate_vlan_ids([vlan_id], source)
+    cfg = result.get(vlan_id)
+    if cfg is not None and cfg.state == "absent":
+        raise DualSyntaxConflictError(
+            f"Port-centric VLAN membership targets VLAN {vlan_id}, but VLAN-centric input "
+            "marks it absent."
+        )
+    if vlan_id in known:
+        return
+    if auto_create:
+        result[vlan_id] = VlanConfig(vlan_id=vlan_id)
+        known.add(vlan_id)
+        return
+    raise ValueError(
+        f"{source} references unknown VLAN {vlan_id}; declare it present or enable "
+        "auto_create_referenced_vlans"
+    )
 
 
 def port_has_vlan_membership_input(port: PortConfig) -> bool:

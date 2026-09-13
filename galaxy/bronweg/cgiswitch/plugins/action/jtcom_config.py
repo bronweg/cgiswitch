@@ -31,7 +31,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 return dict(failed=True, msg=f"Parameter '{key}' is required.")
 
         try:
-            from cgiswitch.client.errors import JTComError
+            from cgiswitch.client.errors import JTComError, JTComPolicyError
             from cgiswitch.model.config import DeviceConfig
             from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
             from cgiswitch.model.port import PortConfig
@@ -85,6 +85,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             allow_port_mode_change=p.get("allow_port_mode_change", False),
             allow_untagged_move=p.get("allow_untagged_move", False),
             allow_vlan_delete_in_use=p.get("allow_vlan_delete_in_use", False),
+            auto_create_referenced_vlans=p.get("auto_create_referenced_vlans", False),
         )
 
         try:
@@ -103,6 +104,17 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 )
             finally:
                 switch.close()
+        except JTComPolicyError as exc:
+            return dict(
+                failed=True,
+                msg=str(exc),
+                changed=False,
+                blocked=True,
+                violations=exc.violations,
+                backup_file="",
+                applied=[],
+                warnings=[],
+            )
         except (JTComError, ValueError, ConnectionError) as exc:
             return dict(failed=True, msg=str(exc))
 
@@ -112,6 +124,8 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             backup_file=cfg_result.get("backup_file", ""),
             applied=cfg_result.get("applied", []),
             warnings=cfg_result.get("warnings", []),
+            blocked=cfg_result.get("blocked", False),
+            violations=cfg_result.get("violations", []),
             changed_ports=cfg_result.get("changed_ports", []),
             changed_vlans=cfg_result.get("changed_vlans", []),
         )

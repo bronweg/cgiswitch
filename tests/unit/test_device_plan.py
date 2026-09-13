@@ -290,33 +290,22 @@ def test_port_admin_up_false_disables() -> None:
 
 
 # ---------------------------------------------------------------------------
-# safety_port_id
+# Safety-port planning
 # ---------------------------------------------------------------------------
 
 
-def test_safety_port_prevents_disable(recwarn: pytest.WarningsChecker) -> None:
+def test_safety_port_disable_remains_in_plan() -> None:
     cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
     des = _cfg(ports={6: _port(6, admin_up=False)})
-    plan = build_device_plan(cur, des, safety_port_id=6)
-    assert plan.changes == []
-    assert len(recwarn) == 1
-    assert "safety port" in str(recwarn[0].message)
-
-
-def test_safety_port_prevents_disable_via_admin_up_false(recwarn: pytest.WarningsChecker) -> None:
-    """admin_up=False on the safety port must be blocked with a warning."""
-    cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
-    des = _cfg(ports={6: _port(6, admin_up=False)})
-    plan = build_device_plan(cur, des, safety_port_id=6)
-    assert plan.changes == []
-    assert len(recwarn) == 1
-    assert "safety port" in str(recwarn[0].message)
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    assert plan.changes[0].details["admin_up"] == {"from": True, "to": False}
 
 
 def test_safety_port_allows_enable() -> None:
     cur = _cfg(ports={6: _port(6, admin_up=False, speed="Auto", flow=True)})
     des = _cfg(ports={6: _port(6, admin_up=True)})
-    plan = build_device_plan(cur, des, safety_port_id=6)
+    plan = build_device_plan(cur, des)
     assert len(plan.changes) == 1
     assert plan.changes[0].details["admin_up"] == {"from": False, "to": True}
 
@@ -324,16 +313,9 @@ def test_safety_port_allows_enable() -> None:
 def test_safety_port_allows_speed_change() -> None:
     cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
     des = _cfg(ports={6: _port(6, speed="1000M/Full")})
-    plan = build_device_plan(cur, des, safety_port_id=6)
+    plan = build_device_plan(cur, des)
     assert len(plan.changes) == 1
     assert "speed_duplex" in plan.changes[0].details
-
-
-def test_no_safety_port_id_does_not_block() -> None:
-    cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
-    des = _cfg(ports={6: _port(6, admin_up=False)})
-    plan = build_device_plan(cur, des, safety_port_id=None)
-    assert len(plan.changes) == 1
 
 
 # ---------------------------------------------------------------------------

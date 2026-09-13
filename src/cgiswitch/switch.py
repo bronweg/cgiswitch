@@ -7,7 +7,12 @@ import logging
 import pathlib
 from typing import Any
 
-from cgiswitch.client.errors import JTComError, JTComStateError, JTComVerificationError
+from cgiswitch.client.errors import (
+    JTComError,
+    JTComPolicyError,
+    JTComStateError,
+    JTComVerificationError,
+)
 from cgiswitch.client.port_ops import apply_port_changes, compile_port_changes
 from cgiswitch.client.session import JTComCredentials, JTComSession
 from cgiswitch.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
@@ -21,6 +26,7 @@ from cgiswitch.parser.port import parse_port_page
 from cgiswitch.parser.vlan import parse_port_vlan_settings, parse_static_vlans
 from cgiswitch.utils.device_diff import build_device_plan
 from cgiswitch.utils.normalize import normalize_device_config
+from cgiswitch.utils.policy import evaluate_device_policy
 from cgiswitch.utils.port_vlan_input import merge_port_vlan_membership_inputs
 from cgiswitch.utils.render import render_diff
 from cgiswitch.utils.validation import validate_desired_config
@@ -191,17 +197,19 @@ class JTComSwitch:
             A dict with keys:
 
             - ``"changed"`` — ``True`` if any changes were (or would be) applied.
+            - ``"blocked"`` — whether policy forbids the planned changes.
+            - ``"violations"`` — structured policy failures, separate from warnings.
             - ``"diff"`` — rendered plan dict from :func:`~cgiswitch.utils.render.render_diff`.
             - ``"backup_file"`` — path to the backup, or ``""`` if skipped.
             - ``"applied"`` — list of change keys that were applied.
 
         Raises:
             JTComError: If the session is not open.
+            JTComPolicyError: If policy blocks a real apply, before backup or writes.
             JTComVerificationError: If post-apply verification detects residual
                 differences between the switch state and *desired*.
         """
         session = self._require_session()
-        safety_port_id = self.policy.safety_port_id
 
         # --- Read and normalize current state ---
         current_vlans, current_ports = self._read_current_state(session)
@@ -217,6 +225,8 @@ class JTComSwitch:
             current_per_port,
             desired_n.vlans,
             desired_n.ports,
+            known_vlan_ids=current_vlans,
+            auto_create_referenced_vlans=self.policy.auto_create_referenced_vlans,
         )
         desired_plan_n = DeviceConfig(
             vlans=merged_desired_vlans,
@@ -228,21 +238,21 @@ class JTComSwitch:
         plan = build_device_plan(
             current_n,
             desired_plan_n,
-            safety_port_id=safety_port_id,
         )
         diff = render_diff(plan)
         membership_plan = self._plan_vlan_membership(
             current_vlans,
             current_ports,
             desired_plan_n.vlans,
-            check_mode=check_mode,
             policy=self.policy,
         )
-        if membership_plan.changed_ports or membership_plan.warnings:
+        violations = evaluate_device_policy(plan, self.policy) + membership_plan.violations
+        if membership_plan.changed_ports or membership_plan.warnings or membership_plan.violations:
             diff["vlan_membership"] = {
                 "changed_ports": membership_plan.changed_ports,
                 "changed_vlans": membership_plan.changed_vlans,
                 "warnings": membership_plan.warnings,
+                "violations": membership_plan.violations,
                 "before": serialize_membership_map(membership_plan.current_per_port),
                 "after": serialize_membership_map(membership_plan.desired_per_port),
             }
@@ -254,20 +264,15 @@ class JTComSwitch:
         ])
         compile_port_changes(current_ports, port_changes)
 
-        if not plan.changes and not membership_plan.changed_ports:
-            return {
-                "changed": False,
-                "diff": diff,
-                "backup_file": "",
-                "applied": [],
-                "warnings": membership_plan.warnings,
-                "changed_ports": [],
-                "changed_vlans": [],
-            }
+        if violations and not check_mode:
+            raise JTComPolicyError(violations)
 
-        if check_mode:
+        changed = bool(plan.changes or membership_plan.changed_ports)
+        if check_mode or not changed:
             return {
-                "changed": True,
+                "changed": changed,
+                "blocked": bool(violations),
+                "violations": violations,
                 "diff": diff,
                 "backup_file": "",
                 "applied": [],
@@ -326,7 +331,6 @@ class JTComSwitch:
         residual_plan = build_device_plan(
             post_n,
             desired_plan_n,
-            safety_port_id=safety_port_id,
         )
         if residual_plan.changes:
             raise JTComVerificationError(remaining_diff=render_diff(residual_plan))
@@ -334,6 +338,8 @@ class JTComSwitch:
 
         return {
             "changed": True,
+            "blocked": False,
+            "violations": [],
             "diff": diff,
             "backup_file": backup_file,
             "applied": applied,
@@ -348,7 +354,6 @@ class JTComSwitch:
         current_ports: list[PortSettings],
         desired_vlans: dict[int, VlanConfig],
         *,
-        check_mode: bool,
         policy: ApplyPolicy,
     ) -> VlanMembershipPlan:
         """Build a canonical VLAN membership plan from current switch state."""
@@ -360,7 +365,6 @@ class JTComSwitch:
             allow_port_mode_change=policy.allow_port_mode_change,
             allow_untagged_move=policy.allow_untagged_move,
             allow_vlan_delete_in_use=policy.allow_vlan_delete_in_use,
-            check_mode=check_mode,
         )
 
     def _apply_vlan_membership_plan(
