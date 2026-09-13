@@ -17,6 +17,13 @@
         password: "{{ switch_pass }}"
         verify_tls: false
         allow_port_mode_change: true
+        vlans:
+          10:
+            state: present
+          20:
+            state: present
+          30:
+            state: present
         ports:
           5:
             native_vlan: 10

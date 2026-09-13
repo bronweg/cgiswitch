@@ -9,7 +9,7 @@ def _validate_vlan_id(vlan_id: int | None, field_name: str) -> None:
     """Validate an optional 802.1Q VLAN ID."""
     if vlan_id is None:
         return
-    if not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+    if isinstance(vlan_id, bool) or not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
         raise ValueError(f"{field_name} must be 1-4094, got {vlan_id}")
 
 
@@ -18,7 +18,7 @@ def _validate_vlan_list(vlan_list: list[int] | None, field_name: str) -> None:
     if vlan_list is None:
         return
     for vlan_id in vlan_list:
-        if not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+        if isinstance(vlan_id, bool) or not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
             raise ValueError(
                 f"Invalid VLAN '{vlan_id}' in '{field_name}'. VLAN IDs must be 1-4094."
             )
@@ -82,8 +82,8 @@ class PortConfig:
             (e.g. ``"Auto"``, ``"1000M/Full"``), or ``None`` to leave unchanged.
         flow_control: ``True`` to enable flow control, ``False`` to disable,
             ``None`` to leave unchanged.
-        access_vlan: Assign this port as untagged member of the VLAN. This is
-            translated to VLAN-centric ``untagged_add`` by the merge layer.
+        access_vlan: Select access mode with this untagged VLAN and no tagged
+            memberships. Cannot be combined with native_vlan or trunk_* fields.
         native_vlan: Assign this port's trunk native VLAN. This is translated
             to VLAN-centric ``untagged_add`` by the merge layer.
         trunk_add_vlans: Add this port as tagged member of these VLANs.
@@ -104,6 +104,10 @@ class PortConfig:
     def __post_init__(self) -> None:
         if self.port_id < 1:
             raise ValueError(f"port_id must be >= 1, got {self.port_id}")
+        if self.access_vlan is not None and any(value is not None for value in (
+            self.native_vlan, self.trunk_add_vlans, self.trunk_remove_vlans, self.trunk_set_vlans,
+        )):
+            raise ValueError("access_vlan cannot be combined with native_vlan or trunk_* fields")
         _validate_vlan_id(self.access_vlan, "access_vlan")
         _validate_vlan_id(self.native_vlan, "native_vlan")
         _validate_vlan_list(self.trunk_add_vlans, "trunk_add_vlans")

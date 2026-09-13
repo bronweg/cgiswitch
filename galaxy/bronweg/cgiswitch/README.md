@@ -32,6 +32,12 @@ Idempotent, diff-aware PATCH-style configuration of VLANs and ports.
 - Supports Ansible `--check` (dry-run) mode
 - Port 6 (management uplink) cannot be administratively disabled
 - VLAN 1 cannot be deleted
+- Port-centric VLAN references must name an existing switch VLAN or a VLAN
+  declared under `vlans:` with `state: present`. Unknown references fail before
+  backup or writes. Set `auto_create_referenced_vlans: true` to create unknown
+  add/set references automatically; the default is `false`.
+- `trunk_remove_vlans` never creates VLANs. An unknown remove target fails closed,
+  including when auto-creation is enabled. VLAN IDs must be in the 1..4094 range.
 
 Canonical model:
 
@@ -57,7 +63,9 @@ VLAN membership policy:
 - If a changed port would otherwise have no VLAN membership, it is mapped to
   access VLAN 1 and a `mode_none_mapped_to_vlan1` warning is returned. This
   fallback can still trigger access↔trunk protection if the effective result
-  changes port mode.
+  changes port mode; set `allow_port_mode_change: true` when that transition is
+  intended. A fallback that moves the untagged VLAN can also require
+  `allow_untagged_move: true`.
 
 Warnings are structured objects with common fields such as:
 
@@ -66,6 +74,13 @@ Warnings are structured objects with common fields such as:
 - `message`
 - `port_id` / `vlan_id`
 - `hint`
+
+Policy violations are returned separately from advisory warnings. In check
+mode, a blocked operation returns `blocked: true`, `changed: true`, the
+structured `violations`, an empty `backup_file`, and an empty `applied` list.
+In normal mode, the same violations fail before backup or writes. Inspect
+`violations` for blocked safety-port shutdowns, mode changes, untagged moves,
+and VLAN deletion or membership operations that the backend cannot express.
 
 ```yaml
 - name: Configure switch

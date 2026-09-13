@@ -44,7 +44,11 @@ class VlanEntry:
     active: bool = True
 
     def __post_init__(self) -> None:
-        if not 1 <= self.vlan_id <= 4094:
+        if (
+            isinstance(self.vlan_id, bool)
+            or not isinstance(self.vlan_id, int)
+            or not 1 <= self.vlan_id <= 4094
+        ):
             raise ValueError(f"vlan_id must be 1-4094, got {self.vlan_id}")
 
 
@@ -117,7 +121,11 @@ class VlanConfig:
 
     def __post_init__(self) -> None:
         # VLAN ID validation
-        if not 1 <= self.vlan_id <= 4094:
+        if (
+            isinstance(self.vlan_id, bool)
+            or not isinstance(self.vlan_id, int)
+            or not 1 <= self.vlan_id <= 4094
+        ):
             raise ValueError(f"vlan_id must be 1-4094, got {self.vlan_id}")
 
         # State validation

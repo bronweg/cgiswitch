@@ -25,3 +25,4 @@ class ApplyPolicy:
     allow_port_mode_change: bool = False
     allow_untagged_move: bool = False
     allow_vlan_delete_in_use: bool = False
+    auto_create_referenced_vlans: bool = False
