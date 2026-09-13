@@ -149,7 +149,6 @@ def test_apply_uses_constructor_backup_policy(
         [],
     )
     monkeypatch.setattr(switch, "_read_current_state", MagicMock(side_effect=[current, post]))
-    monkeypatch.setattr("cgiswitch.switch.vlan_create", MagicMock())
     session.download_config_backup.return_value = b"backup"
     desired = DeviceConfig(vlans={10: VlanConfig(vlan_id=10, name="v10")})
 

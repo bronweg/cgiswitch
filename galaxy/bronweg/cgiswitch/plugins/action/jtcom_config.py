@@ -31,7 +31,11 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 return dict(failed=True, msg=f"Parameter '{key}' is required.")
 
         try:
-            from cgiswitch.client.errors import JTComError, JTComPolicyError
+            from cgiswitch.client.errors import (
+                JTComApplyError,
+                JTComError,
+                JTComPolicyError,
+            )
             from cgiswitch.model.config import DeviceConfig
             from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
             from cgiswitch.model.port import PortConfig
@@ -104,6 +108,8 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 )
             finally:
                 switch.close()
+        except JTComApplyError as exc:
+            return exc.as_result()
         except JTComPolicyError as exc:
             return dict(
                 failed=True,
@@ -128,6 +134,8 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             violations=cfg_result.get("violations", []),
             changed_ports=cfg_result.get("changed_ports", []),
             changed_vlans=cfg_result.get("changed_vlans", []),
+            completed_operations=cfg_result.get("completed_operations", []),
+            operations=cfg_result.get("operations", []),
         )
         return result
 

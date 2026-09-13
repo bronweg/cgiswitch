@@ -14,8 +14,9 @@ with BeautifulSoup, and exposes a canonical switch API. This makes it
 possible to manage JTCom (and compatible) switches from Ansible and Python scripts.
 
 This project is Alpha software. Hardware validation of this refactoring is
-pending. There is no automatic rollback after a failed write. Test changes in check mode and retain
-device backups according to your operating procedures.
+pending. The apply path does not perform automatic rollback after a failed
+write. Test changes in check mode and retain device backups according to your
+operating procedures.
 
 ---
 
@@ -78,9 +79,9 @@ JTCom itself uses a backend-specific model:
 - trunk mode: `native_vlan` + `permit_vlans`
 - on JTCom, `permit_vlans` includes `native_vlan`
 
-You normally do not need to think in backend terms. The core compiles
-canonical desired state into JTCom backend state only at the final write
-boundary, then normalizes JTCom readback back into canonical state before
+You normally do not need to think in backend terms. The core compiles every
+planned write into JTCom backend state before taking a backup or performing any
+write, then normalizes JTCom readback back into canonical state before
 verification.
 
 ### Incremental Change Model
@@ -122,6 +123,33 @@ Before backup or any write, all required port payload fields must be known
 from current state or explicitly supplied in the desired configuration. Unknown
 administrative state and flow control are never replaced with guessed defaults.
 These preflight checks also run in check mode.
+
+### Apply Orchestration and Failure Reporting
+
+The apply path compiles and validates the complete operation list before a
+backup is taken. It presents operations in this deterministic order:
+
+1. VLAN creates, sorted by ascending VLAN ID
+2. VLAN renames, sorted by ascending VLAN ID
+3. VLAN membership updates, sorted by ascending port ID
+4. Port settings updates, sorted by ascending port ID
+5. VLAN deletes, sorted by descending VLAN ID
+
+Check mode returns the planned diff and operation descriptions without a
+backup or device writes. On a successful apply, `completed_operations` records
+the writes confirmed by the client. A policy or preflight failure remains an
+original validation or policy error and occurs before backup and writes.
+
+If backup, a write, or verification fails, the Ansible result and
+other structured callers receive `JTComApplyError.as_result()` with
+`backup_file`, `completed_operations`, `failed_operation`,
+`original_exception`, `write_attempted`, and best-effort `readback` or
+`readback_error` fields. `failed_operation` can identify the backup or
+verification phase. The original exception object remains available as
+`exc.original_exception` and is preserved as the exception cause. Once a POST
+may have been attempted, `changed` is conservatively `true`, including when
+the first write fails. Verification failures include `remaining_diff`.
+No automatic rollback is attempted.
 
 ### Referenced VLANs
 
@@ -386,7 +414,7 @@ Runtime flow:
 1. normalize input
 2. merge VLAN-centric and port-centric syntax
 3. plan and apply policy on canonical state
-4. compile canonical state to JTCom backend only at write time
+4. compile the complete backend operation list before backup or any write
 5. read JTCom state back and normalize to canonical state
 6. verify canonical expected vs canonical actual
 

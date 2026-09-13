@@ -5,27 +5,29 @@ from __future__ import annotations
 import datetime
 import logging
 import pathlib
+from copy import deepcopy
+from dataclasses import asdict
 from typing import Any
 
 from cgiswitch.client.errors import (
+    JTComApplyError,
     JTComError,
     JTComPolicyError,
     JTComStateError,
     JTComVerificationError,
 )
-from cgiswitch.client.port_ops import apply_port_changes, compile_port_changes
 from cgiswitch.client.session import JTComCredentials, JTComSession
-from cgiswitch.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
 from cgiswitch.model.config import DeviceConfig
 from cgiswitch.model.device import DeviceInfo
 from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
-from cgiswitch.model.port import PortChangeSet, PortOperStatus, PortSettings
+from cgiswitch.model.port import PortOperStatus, PortSettings
 from cgiswitch.model.vlan import VlanConfig, VlanEntry
 from cgiswitch.parser.device import parse_device_info
 from cgiswitch.parser.port import parse_port_page
 from cgiswitch.parser.vlan import parse_port_vlan_settings, parse_static_vlans
 from cgiswitch.utils.device_diff import build_device_plan
 from cgiswitch.utils.normalize import normalize_device_config
+from cgiswitch.utils.operations import compile_apply_operations, compile_membership_operations
 from cgiswitch.utils.policy import evaluate_device_policy
 from cgiswitch.utils.port_vlan_input import merge_port_vlan_membership_inputs
 from cgiswitch.utils.render import render_diff
@@ -35,7 +37,6 @@ from cgiswitch.utils.vlan_membership import (
     VlanMembershipPlan,
     build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
-    canonical_to_jtcom_port_vlan_state,
     copy_port_state,
     diff_membership_maps,
     plan_vlan_membership_changes,
@@ -201,13 +202,15 @@ class JTComSwitch:
             - ``"violations"`` — structured policy failures, separate from warnings.
             - ``"diff"`` — rendered plan dict from :func:`~cgiswitch.utils.render.render_diff`.
             - ``"backup_file"`` — path to the backup, or ``""`` if skipped.
-            - ``"applied"`` — list of change keys that were applied.
+            - ``"applied"`` — list of confirmed operation keys.
+            - ``"operations"`` — ordered executable operation descriptions.
+            - ``"completed_operations"`` — descriptions of confirmed writes.
 
         Raises:
             JTComError: If the session is not open.
             JTComPolicyError: If policy blocks a real apply, before backup or writes.
-            JTComVerificationError: If post-apply verification detects residual
-                differences between the switch state and *desired*.
+            JTComApplyError: If backup, a write, or verification fails. Includes
+                confirmed operations, the original exception, and best-effort readback.
         """
         session = self._require_session()
 
@@ -257,17 +260,19 @@ class JTComSwitch:
                 "after": serialize_membership_map(membership_plan.desired_per_port),
             }
 
-        # Validate every full port payload before backup, VLAN writes, or check-mode return.
-        port_changes = PortChangeSet(update=[
-            desired_n.ports[change.details["port_id"]]
-            for change in plan.changes if change.kind == "port_update"
-        ])
-        compile_port_changes(current_ports, port_changes)
-
         if violations and not check_mode:
             raise JTComPolicyError(violations)
 
-        changed = bool(plan.changes or membership_plan.changed_ports)
+        # Compile every executable payload before backup or the first write.
+        # A blocked preview has no executable operations (some cannot be compiled).
+        operations = [] if violations else compile_apply_operations(
+            plan, desired_plan_n, current_ports, membership_plan,
+        )
+        operation_records = [operation.describe() for operation in operations]
+
+        changed = (
+            bool(plan.changes or membership_plan.changed_ports) if violations else bool(operations)
+        )
         if check_mode or not changed:
             return {
                 "changed": changed,
@@ -276,6 +281,8 @@ class JTComSwitch:
                 "diff": diff,
                 "backup_file": "",
                 "applied": [],
+                "operations": operation_records,
+                "completed_operations": [],
                 "warnings": membership_plan.warnings,
                 "changed_ports": membership_plan.changed_ports,
                 "changed_vlans": membership_plan.changed_vlans,
@@ -283,58 +290,67 @@ class JTComSwitch:
                 "after": serialize_membership_map(membership_plan.desired_per_port),
             }
 
-        # --- Backup before change ---
-        do_backup = self.policy.backup_before_change
-        backup_file = self._save_backup(session, self.policy.backup_dir) if do_backup else ""
-
-        # --- Apply VLAN creates and renames before membership changes ---
-        applied: list[str] = []
-        for change in plan.changes:
-            if change.kind == "vlan_create":
-                vid = change.details["vlan_id"]
-                vc = desired_plan_n.vlans[vid]
-                vlan_create(session, vc.vlan_id, vc.name)
-                logger.info("Created VLAN %d (%s)", vid, vc.name)
-                applied.append(change.key)
-            elif change.kind == "vlan_update" and "name" in change.details:
-                vid = change.details["vlan_id"]
-                vc = desired_plan_n.vlans[vid]
-                vlan_create(session, vc.vlan_id, vc.name)
-                logger.info("Updated VLAN %d (%s)", vid, vc.name)
-                applied.append(change.key)
-
-        self._apply_vlan_membership_plan(session, membership_plan)
-        applied.extend(
-            f"vlan_membership:port:{port_id}" for port_id in membership_plan.changed_ports
+        # Verify membership against the effective canonical target, not by
+        # replaying the original patch after policy fallback resolution.
+        verification_desired = DeviceConfig(
+            vlans={vid: VlanConfig(vid, name=cfg.name, state=cfg.state)
+                   for vid, cfg in desired_plan_n.vlans.items()},
+            ports=desired_plan_n.ports,
         )
+        backup_file = ""
+        completed: list[dict[str, str]] = []
+        failed_operation = {"key": "backup", "kind": "backup"}
+        write_attempted = False
+        try:
+            if self.policy.backup_before_change:
+                backup_file = self._save_backup(session, self.policy.backup_dir)
 
-        for change in plan.changes:
-            if change.kind == "port_update":
-                pid = change.details["port_id"]
-                desired_port = desired_n.ports[pid]
-                port_cs = PortChangeSet(update=[desired_port])
-                apply_port_changes(session, current_ports, port_cs)
-                logger.info("Updated port %d", pid)
-                applied.append(change.key)
+            for operation in operations:
+                failed_operation = operation.describe()
+                write_attempted = True
+                session.post(operation.endpoint, data=deepcopy(operation.data))
+                completed.append(operation.describe())
+                logger.info("Applied %s (%s)", operation.key, operation.kind)
 
-        for change in plan.changes:
-            if change.kind == "vlan_delete":
-                vid = change.details["vlan_id"]
-                vlan_delete(session, [vid])
-                logger.info("Deleted VLAN %d", vid)
-                applied.append(change.key)
-
-        # --- Post-apply verification ---
-        post_vlans, post_ports = self._read_current_state(session)
-        post_cfg = DeviceConfig.from_current(post_vlans, post_ports)
-        post_n = normalize_device_config(post_cfg)
-        residual_plan = build_device_plan(
-            post_n,
-            desired_plan_n,
-        )
-        if residual_plan.changes:
-            raise JTComVerificationError(remaining_diff=render_diff(residual_plan))
-        self._verify_vlan_membership(session, membership_plan)
+            failed_operation = {"key": "verify", "kind": "verification"}
+            post_vlans, post_ports = self._read_current_state(session)
+            post_cfg = DeviceConfig.from_current(post_vlans, post_ports)
+            post_n = normalize_device_config(post_cfg)
+            missing_ports = sorted(set(verification_desired.ports) - set(post_n.ports))
+            if missing_ports:
+                raise JTComVerificationError(remaining_diff={
+                    "total_changes": len(missing_ports),
+                    "changes": [{"kind": "port_missing", "key": f"port:{pid}",
+                                 "details": {"port_id": pid}} for pid in missing_ports],
+                })
+            residual_plan = build_device_plan(post_n, verification_desired)
+            if residual_plan.changes:
+                raise JTComVerificationError(remaining_diff=render_diff(residual_plan))
+            self._verify_vlan_membership(
+                session, membership_plan, current_state=(post_vlans, post_ports),
+            )
+        except Exception as exc:
+            readback: dict[str, Any] | None = None
+            readback_error: Exception | None = None
+            try:
+                observed_vlans, observed_ports = self._read_current_state(session)
+                readback = {
+                    "vlans": {vid: asdict(vlan) for vid, vlan in sorted(observed_vlans.items())},
+                    "ports": [asdict(port) for port in sorted(
+                        observed_ports, key=lambda port: port.port_id,
+                    )],
+                }
+            except Exception as recovery_exc:
+                readback_error = recovery_exc
+            raise JTComApplyError(
+                backup_file=backup_file,
+                completed_operations=completed,
+                failed_operation=failed_operation,
+                original_exception=exc,
+                write_attempted=write_attempted,
+                readback=readback,
+                readback_error=readback_error,
+            ) from exc
 
         return {
             "changed": True,
@@ -342,7 +358,9 @@ class JTComSwitch:
             "violations": [],
             "diff": diff,
             "backup_file": backup_file,
-            "applied": applied,
+            "applied": [operation["key"] for operation in completed],
+            "operations": operation_records,
+            "completed_operations": completed,
             "warnings": membership_plan.warnings,
             "changed_ports": membership_plan.changed_ports,
             "changed_vlans": membership_plan.changed_vlans,
@@ -372,44 +390,16 @@ class JTComSwitch:
         session: JTComSession,
         membership_plan: VlanMembershipPlan,
     ) -> None:
-        """Compile canonical desired state to JTCom backend state at write time."""
-        for port_id in membership_plan.changed_ports:
-            desired_state = copy_port_state(membership_plan.desired_per_port[port_id])
-            # This is the only place where canonical desired port state is
-            # compiled into JTCom backend representation.
-            try:
-                backend_state = canonical_to_jtcom_port_vlan_state(desired_state)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Port {port_id} canonical state cannot be compiled to JTCom "
-                    f"backend: {exc}"
-                ) from exc
-
-            # JTCom backend uses access_vlan or native_vlan + permit_vlans,
-            # and permit_vlans includes the native VLAN on trunk ports.
-            if backend_state["mode"] == "trunk":
-                vlan_set_port(
-                    session,
-                    port_ids=[port_id],
-                    vlan_type="trunk",
-                    access_vlan=None,
-                    native_vlan=backend_state["native_vlan"],
-                    permit_vlans=list(backend_state["permit_vlans"]),
-                )
-            elif backend_state["mode"] == "access":
-                vlan_set_port(
-                    session,
-                    port_ids=[port_id],
-                    vlan_type="access",
-                    access_vlan=backend_state["access_vlan"],
-                    native_vlan=None,
-                    permit_vlans=[],
-                )
+        """Compile the complete membership batch before issuing any writes."""
+        for operation in compile_membership_operations(membership_plan):
+            session.post(operation.endpoint, data=deepcopy(operation.data))
 
     def _verify_vlan_membership(
         self,
         session: JTComSession,
         membership_plan: VlanMembershipPlan,
+        *,
+        current_state: tuple[dict[int, VlanEntry], list[PortSettings]] | None = None,
     ) -> None:
         """Verify changed VLAN membership ports after a real apply.
 
@@ -419,7 +409,9 @@ class JTComSwitch:
         """
         if not membership_plan.changed_ports:
             return
-        post_vlans, post_ports = self._read_current_state(session)
+        post_vlans, post_ports = (
+            current_state if current_state is not None else self._read_current_state(session)
+        )
         post_per_port = build_current_per_port_from_vlans(
             post_vlans,
             [settings.port_id for settings in post_ports],

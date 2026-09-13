@@ -4,7 +4,7 @@ Ansible Collection for managing JTCom CGI-based L2 Ethernet switches via
 [cgiswitch](https://github.com/bronweg/cgiswitch).
 
 This collection is Alpha software. Hardware validation is still pending, and
-the apply path does not promise rollback after a failed write.
+the apply path does not perform automatic rollback after a failed write.
 
 ## Requirements
 
@@ -51,8 +51,24 @@ JTCom backend model:
 - on JTCom, `permit_vlans` includes `native_vlan`
 
 The collection accepts VLAN-centric and port-centric input, plans on canonical
-state, compiles to JTCom backend state only at write time, then verifies
-canonical expected vs canonical actual.
+state, compiles every planned write to JTCom backend state before backup or any
+write, then verifies canonical expected vs canonical actual.
+
+Before backup or any write, the action plugin compiles and validates the full
+operation list. Operations have a deterministic order: VLAN creates by
+ascending VLAN ID, VLAN renames by ascending VLAN ID, VLAN membership updates
+by ascending port ID, port settings by ascending port ID, and VLAN deletes by
+descending VLAN ID. Check mode exposes operation descriptions without taking a
+backup or writing to the device.
+
+Successful results include `completed_operations` for writes confirmed by the
+client. A failure after writes begin returns structured context with
+`backup_file`, `completed_operations`, `failed_operation`,
+`original_exception`, `write_attempted`, and best-effort `readback` or
+`readback_error`. If a POST may have been attempted, `changed` is conservatively
+`true`, including a failure on the first write. Verification failures include
+`remaining_diff`. Policy and preflight failures remain blocked before backup or
+writes. Automatic rollback is not performed.
 
 VLAN membership policy:
 
