@@ -14,6 +14,9 @@ Enable the versioned local hooks with `git config core.hooksPath .githooks`.
 Run `python3 tools/check_language.py --staged` to check the Git index, or
 `python3 tools/check_language.py` to check tracked working-tree content.
 The commit-message hook applies the same character check to commit messages.
+CI and these hooks mechanically reject Cyrillic as a guard against accidental
+Russian text; they do not verify that all text is English. The English-only
+repository rule above still applies.
 
 ## Refactoring discipline
 
