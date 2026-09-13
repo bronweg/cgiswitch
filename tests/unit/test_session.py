@@ -1,4 +1,4 @@
-"""Unit tests for napalm_jtcom.client.session and napalm_jtcom.client.http."""
+"""Unit tests for cgiswitch.client.session and cgiswitch.client.http."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 import requests
 import responses as rsps_lib
 
-from napalm_jtcom.client.errors import (
+from cgiswitch.client.errors import (
     CODE_AUTH_EXPIRED,
     CODE_OK,
     CODE_PARAM_ERR,
@@ -19,9 +19,9 @@ from napalm_jtcom.client.errors import (
     JTComResponseError,
     JTComSwitchError,
 )
-from napalm_jtcom.client.http import JTComHTTP, _normalise_base_url
-from napalm_jtcom.client.session import JTComCredentials, JTComSession
-from napalm_jtcom.vendor.jtcom.endpoints import LOGIN, LOGOUT
+from cgiswitch.client.http import JTComHTTP, _normalise_base_url
+from cgiswitch.client.session import JTComCredentials, JTComSession
+from cgiswitch.vendor.jtcom.endpoints import LOGIN, LOGOUT
 
 BASE_URL = "http://192.168.1.1"
 CREDS = JTComCredentials(username="admin", password="secret")
@@ -142,7 +142,7 @@ def test_http_user_agent_header_sent() -> None:
     rsps_lib.add(rsps_lib.GET, f"{BASE_URL}/cgi-bin/info.cgi", body="ok", status=200)
     http = JTComHTTP(BASE_URL, verify_tls=False)
     http.get("/cgi-bin/info.cgi")
-    assert rsps_lib.calls[0].request.headers["User-Agent"].startswith("napalm-jtcom/")
+    assert rsps_lib.calls[0].request.headers["User-Agent"].startswith("cgiswitch/")
     http.close()
 
 
@@ -248,7 +248,7 @@ def test_logout_marks_logged_out_on_success() -> None:
 
 @rsps_lib.activate
 def test_get_injects_page_and_stamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("napalm_jtcom.client.session.time.time", lambda: 1700000000.0)
+    monkeypatch.setattr("cgiswitch.client.session.time.time", lambda: 1700000000.0)
     rsps_lib.add(
         rsps_lib.POST,
         f"{BASE_URL}{LOGIN}",
@@ -271,7 +271,7 @@ def test_get_injects_page_and_stamp(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @rsps_lib.activate
 def test_get_passes_extra_params(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("napalm_jtcom.client.session.time.time", lambda: 1700000000.0)
+    monkeypatch.setattr("cgiswitch.client.session.time.time", lambda: 1700000000.0)
     rsps_lib.add(
         rsps_lib.POST,
         f"{BASE_URL}{LOGIN}",

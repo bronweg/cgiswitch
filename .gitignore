@@ -52,3 +52,6 @@ site/
 
 # Switch config backups (may contain credentials)
 backups/
+
+# Generated Galaxy collection archives
+bronweg-cgiswitch-*.tar.gz

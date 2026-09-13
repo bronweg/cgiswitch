@@ -4,12 +4,13 @@
 
 - Python 3.11+
 - Git
+- Ansible Core for collection builds (`pip install ansible-core`)
 
 ## Setup
 
 ```bash
-git clone https://github.com/bronweg/napalm-jtcom.git
-cd napalm-jtcom
+git clone https://github.com/bronweg/cgiswitch.git
+cd cgiswitch
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -20,7 +21,14 @@ pip install --upgrade pip setuptools wheel
 
 # Install project + dev dependencies
 pip install -e ".[dev]"
+
+# Enable the repository language checks for local commits
+git config core.hooksPath .githooks
 ```
+
+Repository content and commit messages must be in English. Check staged
+content with `python3 tools/check_language.py --staged`; CI also scans tracked
+content. The repository URL above targets the pending maintainer rename.
 
 ## Running Tests
 
@@ -59,9 +67,9 @@ mypy src/
 ## Project Structure
 
 ```
-napalm-jtcom/
-  src/napalm_jtcom/
-    driver.py          # NAPALM NetworkDriver subclass
+cgiswitch/
+  src/cgiswitch/
+    switch.py          # JTComSwitch orchestration API
     client/            # HTTP session, request helpers, VLAN/port write ops
     parser/            # HTML → Python object parsers
     model/             # Typed dataclass models (VlanConfig, PortConfig, DeviceConfig …)
@@ -80,13 +88,13 @@ napalm-jtcom/
   docs/                # Developer documentation
 ```
 
-## Adding a New Getter
+## Adding a New Read Helper
 
 1. Identify the CGI endpoint in `vendor/jtcom/endpoints.py`.
 2. Capture an HTML fixture in `tests/fixtures/`.
 3. Add a parser function in `parser/`.
 4. Add a typed model in `model/` if needed.
-5. Implement the getter in `driver.py` calling the session + parser.
+5. Implement the read helper in `switch.py` by calling the session and parser.
 6. Write tests in `tests/unit/`.
 
 ## Building the Ansible Collection

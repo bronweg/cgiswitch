@@ -1,10 +1,10 @@
-"""Unit tests for napalm_jtcom.parser.trunk."""
+"""Unit tests for cgiswitch.parser.trunk."""
 
 from __future__ import annotations
 
 import pytest
 
-from napalm_jtcom.parser.trunk import parse_lacp_status, parse_trunk_groups
+from cgiswitch.parser.trunk import parse_lacp_status, parse_trunk_groups
 
 
 def test_parse_trunk_groups_not_implemented() -> None:

@@ -1,38 +1,44 @@
-# napalm-jtcom
+# cgiswitch
 
-NAPALM community driver for **JTCom CGI-based Ethernet switches**.
+cgiswitch Python core for **JTCom CGI-based Ethernet switches**.
 
-Extends [NAPALM](https://napalm.readthedocs.io/) to support L2 managed switches
+Provides a typed Python API for managing L2 managed switches
 that expose a CGI-based web interface (no SSH/NETCONF/SNMP API).
 
 ---
 
 ## Overview
 
-`napalm-jtcom` speaks HTTP to the switch's built-in web UI, parses HTML responses
-with BeautifulSoup, and exposes a standard NAPALM driver interface. This makes it
-possible to manage JTCom (and compatible) switches from Ansible, Python scripts, and
-any tool built on top of NAPALM.
+`cgiswitch` speaks HTTP to the switch's built-in web UI, parses HTML responses
+with BeautifulSoup, and exposes a canonical switch API. This makes it
+possible to manage JTCom (and compatible) switches from Ansible and Python scripts.
+
+This project is Alpha software. Hardware validation of this refactoring is
+pending. There is no automatic rollback after a failed write. Test changes in check mode and retain
+device backups according to your operating procedures.
 
 ---
 
 ## Supported Devices
 
-| Vendor | Series | Tested |
+| Vendor | Series | Validation |
 |--------|--------|--------|
-| JTCom  | L2 CGI | ✅     |
+| JTCom  | L2 CGI | Fixture-backed; hardware validation pending |
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/bronweg/napalm-jtcom.git
-cd napalm-jtcom
+git clone https://github.com/bronweg/cgiswitch.git
+cd cgiswitch
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+The URLs above target the planned repository name. Until the maintainer
+publishes that rename, use your existing checkout or clone URL.
 
 ---
 
@@ -40,14 +46,14 @@ pip install -e ".[dev]"
 
 | Capability | Detail |
 |---|---|
-| Read device facts | `get_facts()` |
-| Read interfaces | `get_interfaces()` |
-| Read VLANs | `get_vlans()` |
-| Incremental VLAN changes | `set_vlans(desired, dry_run=False)` |
+| Read device facts | `read_device_info()` |
+| Read interfaces | `read_ports()` |
+| Read VLANs | `read_vlans()` |
+| Incremental VLAN changes | `apply(desired, check_mode=False)` |
 | VLAN-centric membership ops | `tagged_add/remove/set`, `untagged_add/remove/set` |
 | Port-centric membership ops | `access_vlan`, `native_vlan`, `trunk_add_vlans`, `trunk_remove_vlans`, `trunk_set_vlans` |
-| Incremental port patching | `apply_device_config()` with `ports=` |
-| Full device config apply | `apply_device_config(desired, check_mode=False)` |
+| Incremental port patching | `apply(DeviceConfig(ports=...))` |
+| Full device config apply | `apply(desired, check_mode=False)` |
 | Ansible Galaxy collection | `bronweg.cgiswitch.jtcom_config` |
 
 ### Port Numbering
@@ -75,7 +81,7 @@ JTCom itself uses a backend-specific model:
 - trunk mode: `native_vlan` + `permit_vlans`
 - on JTCom, `permit_vlans` includes `native_vlan`
 
-You normally do not need to think in backend terms. The driver compiles
+You normally do not need to think in backend terms. The core compiles
 canonical desired state into JTCom backend state only at the final write
 boundary, then normalizes JTCom readback back into canonical state before
 verification.
@@ -143,116 +149,35 @@ Common warning types:
 ### Read-Only Example
 
 ```python
-from napalm_jtcom.driver import JTComDriver
+from cgiswitch import JTComConnectionOptions, JTComSwitch
 
-driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
-driver.open()
-
-try:
-    print(driver.get_facts())
-    print(driver.get_interfaces())
-    print(driver.get_vlans())
-finally:
-    driver.close()
+with JTComSwitch(
+    "192.0.2.1",
+    "admin",
+    "secret",
+    connection=JTComConnectionOptions(verify_tls=False),
+) as switch:
+    print(switch.read_device_info())
+    print(switch.read_ports())
+    print(switch.read_vlans())
 ```
 
-### `set_vlans()` Example
+### Apply Example
 
-Use VLAN-centric input when the desired change is easiest to describe per VLAN.
-
-```python
-from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.vlan import VlanConfig
-
-driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
-driver.open()
-
-try:
-    result = driver.set_vlans(
-        {
-            10: VlanConfig(vlan_id=10, name="Management", state="present"),
-            20: VlanConfig(vlan_id=20, tagged_add=[7, 8], state="present"),
-            30: VlanConfig(vlan_id=30, untagged_add=[1, 2, 3], state="present"),
-            99: VlanConfig(vlan_id=99, state="absent"),
-        },
-        dry_run=True,
-    )
-    print(result)
-finally:
-    driver.close()
-```
-
-### Access Port Example
-
-```python
-from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.config import DeviceConfig
-from napalm_jtcom.model.port import PortConfig
-
-driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
-driver.open()
-
-try:
-    result = driver.apply_device_config(
-        DeviceConfig(
-            ports={
-                3: PortConfig(
-                    port_id=3,
-                    access_vlan=20,
-                ),
-            },
-        ),
-        check_mode=True,
-    )
-    print(result["warnings"])
-finally:
-    driver.close()
-```
-
-### Trunk Port Example
-
-```python
-from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.config import DeviceConfig
-from napalm_jtcom.model.port import PortConfig
-
-driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
-driver.open()
-
-try:
-    result = driver.apply_device_config(
-        DeviceConfig(
-            ports={
-                5: PortConfig(
-                    port_id=5,
-                    native_vlan=10,
-                    trunk_set_vlans=[20, 30],
-                ),
-            },
-        ),
-        check_mode=True,
-    )
-    print(result["diff"])
-finally:
-    driver.close()
-```
-
-### `apply_device_config()` Example
-
-Use `apply_device_config()` when you want to combine VLAN changes, port admin
+Use `apply()` when you want to combine VLAN changes, port admin
 changes, and port-centric VLAN membership in one plan.
 
 ```python
-from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.config import DeviceConfig
-from napalm_jtcom.model.port import PortConfig
-from napalm_jtcom.model.vlan import VlanConfig
+from cgiswitch import JTComConnectionOptions, JTComSwitch
+from cgiswitch.model.config import DeviceConfig
+from cgiswitch.model.port import PortConfig
+from cgiswitch.model.vlan import VlanConfig
 
-driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
-driver.open()
-
-try:
-    result = driver.apply_device_config(
+with JTComSwitch(
+    "192.0.2.1", "admin", "secret",
+    connection=JTComConnectionOptions(verify_tls=False),
+) as switch:
+    result = switch.apply(
         DeviceConfig(
             vlans={
                 100: VlanConfig(vlan_id=100, name="Servers", state="present"),
@@ -267,51 +192,43 @@ try:
                 7: PortConfig(
                     port_id=7,
                     native_vlan=100,
-                    trunk_add_vlans=[200, 300],
+                    trunk_set_vlans=[200, 300],
                 ),
             },
         ),
         check_mode=True,
     )
     print(result["diff"])
-finally:
-    driver.close()
 ```
 
 ### Policy Override Example
 
 ```python
-from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.vlan import VlanConfig
+from cgiswitch import ApplyPolicy, JTComConnectionOptions, JTComSwitch
+from cgiswitch.model.config import DeviceConfig
+from cgiswitch.model.vlan import VlanConfig
 
-driver = JTComDriver("192.0.2.1", "admin", "secret")
-driver.open()
-
-try:
-    result = driver.set_vlans(
-        {
-            20: VlanConfig(vlan_id=20, state="absent"),
-        },
-        dry_run=False,
-        allow_vlan_delete_in_use=True,
-    )
+desired = DeviceConfig(vlans={20: VlanConfig(vlan_id=20, state="absent")})
+policy = ApplyPolicy(allow_vlan_delete_in_use=True)
+with JTComSwitch(
+    "192.0.2.1", "admin", "secret",
+    connection=JTComConnectionOptions(verify_tls=False),
+) as switch:
+    result = switch.apply(desired, policy=policy, check_mode=True)
     print(result["warnings"])
-finally:
-    driver.close()
 ```
 
 ### Dry-Run Example
 
-Both `set_vlans(..., dry_run=True)` and `apply_device_config(..., check_mode=True)`
-return planned diffs, changed ports/VLANs, and structured warnings without
-writing to the device.
+Use `switch.apply(desired, check_mode=True)` for a dry run. It returns planned
+diffs and structured warnings without writing to the device.
 
 Runnable scripts in [`examples/`](examples):
-- [`examples/get_facts.py`](examples/get_facts.py)
-- [`examples/get_interfaces.py`](examples/get_interfaces.py)
-- [`examples/get_vlans.py`](examples/get_vlans.py)
+- [`examples/read_device_info.py`](examples/read_device_info.py)
+- [`examples/read_ports.py`](examples/read_ports.py)
+- [`examples/read_vlans.py`](examples/read_vlans.py)
 - [`examples/apply_vlan.py`](examples/apply_vlan.py)
-- [`examples/apply_device_config.py`](examples/apply_device_config.py)
+- [`examples/apply.py`](examples/apply.py)
 - [`examples/toggle_port_admin.py`](examples/toggle_port_admin.py)
 
 ---
@@ -383,9 +300,9 @@ ansible-doc bronweg.cgiswitch.jtcom_config
 ## Project Structure
 
 ```
-napalm-jtcom/
-  src/napalm_jtcom/
-    driver.py          # NAPALM NetworkDriver subclass
+cgiswitch/
+  src/cgiswitch/
+    switch.py          # JTComSwitch orchestration API
     client/            # HTTP session, request helpers, VLAN/port write ops
     parser/            # HTML → Python object parsers
     model/             # Typed dataclass models (VlanConfig, PortConfig, DeviceConfig …)

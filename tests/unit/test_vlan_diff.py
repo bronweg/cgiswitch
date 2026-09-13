@@ -1,9 +1,9 @@
-"""Unit tests for napalm_jtcom.utils.vlan_diff.plan_vlan_changes."""
+"""Unit tests for cgiswitch.utils.vlan_diff.plan_vlan_changes."""
 
 from __future__ import annotations
 
-from napalm_jtcom.model.vlan import VlanChangeSet, VlanConfig, VlanEntry
-from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
+from cgiswitch.model.vlan import VlanChangeSet, VlanConfig, VlanEntry
+from cgiswitch.utils.vlan_diff import plan_vlan_changes
 
 # ---------------------------------------------------------------------------
 # Helpers

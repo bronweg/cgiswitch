@@ -38,3 +38,8 @@ jobs:
         run: python -m build --outdir "${{ runner.temp }}/python-dist"
       - name: Build Galaxy collection
         run: ansible-galaxy collection build --force --output-path "${{ runner.temp }}/galaxy-dist" galaxy/bronweg/cgiswitch
+      - name: Validate installed collection documentation and examples
+        run: |
+          ansible-galaxy collection install "${{ runner.temp }}"/galaxy-dist/*.tar.gz --force
+          ansible-doc bronweg.cgiswitch.jtcom_config
+          ansible-playbook -i localhost, --syntax-check galaxy/bronweg/cgiswitch/examples/*.yml

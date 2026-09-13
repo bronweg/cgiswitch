@@ -1,4 +1,4 @@
-"""Unit tests for VLAN POST payload formation in napalm_jtcom.client.vlan_ops.
+"""Unit tests for VLAN POST payload formation in cgiswitch.client.vlan_ops.
 
 These tests verify that the correct form fields are built and sent to the
 switch, without requiring a real device.  The :mod:`responses` library is
@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 import pytest
 import responses as responses_lib
 
-from napalm_jtcom.client.errors import JTComSwitchError
-from napalm_jtcom.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
+from cgiswitch.client.errors import JTComSwitchError
+from cgiswitch.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
 
 _BASE = "http://192.168.1.1"
 _OK = json.dumps({"code": 0, "data": ""})
@@ -23,7 +23,7 @@ _ERR = json.dumps({"code": 1, "data": "param error"})
 
 def _mock_session(base_url: str = _BASE) -> MagicMock:
     """Build a minimal mock session that delegates to a real JTComHTTP-like object."""
-    from napalm_jtcom.client.session import JTComCredentials, JTComSession
+    from cgiswitch.client.session import JTComCredentials, JTComSession
 
     session = JTComSession(
         base_url=base_url,

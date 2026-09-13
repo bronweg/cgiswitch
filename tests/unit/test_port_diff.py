@@ -1,9 +1,9 @@
-"""Unit tests for napalm_jtcom.utils.port_diff.plan_port_changes."""
+"""Unit tests for cgiswitch.utils.port_diff.plan_port_changes."""
 
 from __future__ import annotations
 
-from napalm_jtcom.model.port import PortConfig, PortSettings
-from napalm_jtcom.utils.port_diff import plan_port_changes
+from cgiswitch.model.port import PortConfig, PortSettings
+from cgiswitch.utils.port_diff import plan_port_changes
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from napalm_jtcom.utils.vlan_membership import (
+from cgiswitch.utils.vlan_membership import (
     Membership,
     canonical_to_jtcom_port_vlan_state,
     get_vlan_membership_type,

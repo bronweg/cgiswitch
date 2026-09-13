@@ -1,19 +1,22 @@
 # bronweg.cgiswitch
 
 Ansible Collection for managing JTCom CGI-based L2 Ethernet switches via
-[napalm-jtcom](https://github.com/bronweg/napalm-jtcom).
+[cgiswitch](https://github.com/bronweg/cgiswitch).
+
+This collection is Alpha software. Hardware validation is still pending, and
+the apply path does not promise rollback after a failed write.
 
 ## Requirements
 
 - Ansible >= 2.14
-- Python >= 3.10
-- `napalm-jtcom >= 0.8.0` installed in the Ansible controller's Python environment
+- Python >= 3.11
+- `cgiswitch == 0.1.0` installed in the Ansible controller's Python environment
 
 ## Installation
 
 ```bash
 ansible-galaxy collection install bronweg-cgiswitch-0.1.0.tar.gz
-cd /path/to/napalm-jtcom
+cd /path/to/cgiswitch
 python -m pip install -e .
 ```
 
