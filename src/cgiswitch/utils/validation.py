@@ -1,4 +1,4 @@
-"""Validate desired port references against the observed device inventory."""
+"""Validate desired configuration structure and port references."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from cgiswitch.model.config import DeviceConfig
 from cgiswitch.model.port import PortSettings
 
 
-def validate_desired_ports(desired: DeviceConfig, current_ports: list[PortSettings]) -> None:
-    """Reject unknown references before normalization or planning can discard them."""
+def validate_desired_config(desired: DeviceConfig, current_ports: list[PortSettings]) -> None:
+    """Reject mismatched port/VLAN keys and unknown port references before planning."""
     for vlan_id, vlan_config in sorted(desired.vlans.items()):
         if vlan_id != vlan_config.vlan_id:
             raise ValueError(

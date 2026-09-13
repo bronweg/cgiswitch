@@ -23,7 +23,7 @@ from cgiswitch.utils.device_diff import build_device_plan
 from cgiswitch.utils.normalize import normalize_device_config
 from cgiswitch.utils.port_vlan_input import merge_port_vlan_membership_inputs
 from cgiswitch.utils.render import render_diff
-from cgiswitch.utils.validation import validate_desired_ports
+from cgiswitch.utils.validation import validate_desired_config
 from cgiswitch.utils.vlan_membership import (
     PortMembershipMap,
     VlanMembershipPlan,
@@ -205,7 +205,7 @@ class JTComSwitch:
 
         # --- Read and normalize current state ---
         current_vlans, current_ports = self._read_current_state(session)
-        validate_desired_ports(desired, current_ports)
+        validate_desired_config(desired, current_ports)
         current_cfg = DeviceConfig.from_current(current_vlans, current_ports)
         current_n = normalize_device_config(current_cfg)
         desired_n = normalize_device_config(desired)
