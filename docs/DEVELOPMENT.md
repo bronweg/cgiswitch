@@ -44,13 +44,13 @@ pytest tests/unit/test_parser_vlan.py -v
 
 ```bash
 # Lint
-ruff check src/ tests/ ansible/ galaxy/ examples/
+ruff check .
 
 # Auto-fix lint issues
-ruff check --fix src/ tests/ ansible/ galaxy/ examples/
+ruff check --fix .
 
 # Format
-ruff format src/ tests/ ansible/ galaxy/ examples/
+ruff format src/ tests/ galaxy/ examples/ tools/
 
 # Type check
 mypy src/
@@ -67,12 +67,6 @@ napalm-jtcom/
     model/             # Typed dataclass models (VlanConfig, PortConfig, DeviceConfig …)
     utils/             # Diff/plan engines (vlan_diff, device_diff, port_diff, render)
     vendor/jtcom/      # JTCom-specific endpoint paths and field mappings
-  ansible/
-    action_plugins/    # jtcom_config action plugin (imports napalm_jtcom directly)
-    library/           # jtcom_config module stub (docs / argument_spec for ansible-doc)
-    inventory.ini      # Example inventory
-    ansible.cfg        # Ansible configuration
-    test_playbook.yml  # Example playbook
   galaxy/
     bronweg/cgiswitch/ # Ansible Galaxy collection (bronweg.cgiswitch, v0.1.0)
       galaxy.yml       # Collection manifest
@@ -95,26 +89,14 @@ napalm-jtcom/
 5. Implement the getter in `driver.py` calling the session + parser.
 6. Write tests in `tests/unit/`.
 
-## Running the Ansible Module
+## Building the Ansible Collection
 
-The `ansible/` directory contains a native Ansible action plugin that wraps
-`apply_device_config()` directly (no subprocess).
+The Ansible interface is provided by the `bronweg.cgiswitch` Galaxy collection.
+Build it from the repository root with:
 
 ```bash
-cd ansible
-
-# Dry-run (--check) against the real switch:
-OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
-VIRTUAL_ENV=/path/to/.venv \
-ANSIBLE_CONFIG=ansible.cfg \
-/path/to/.venv/bin/ansible-playbook \
-  -i inventory.ini test_playbook.yml \
-  -e jtcom_host=192.0.2.1 -e jtcom_user=admin -e jtcom_pass=admin \
-  --check
+ansible-galaxy collection build --force galaxy/bronweg/cgiswitch
 ```
-
-The `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` flag is required on macOS to
-prevent a fork-safety crash when Ansible forks a subprocess.
 
 ## Releasing
 
