@@ -247,3 +247,51 @@ def test_unknown_remove_target_is_error_before_backup_or_write(
     switch._save_backup.assert_not_called()
     switch._session.post.assert_not_called()
     switch._session.download_config_backup.assert_not_called()
+
+
+@pytest.mark.parametrize("allow", [False, True])
+def test_access_intent_clears_trunk_tags_and_requires_mode_override(
+    monkeypatch: pytest.MonkeyPatch,
+    allow: bool,
+) -> None:
+    current = {
+        1: VlanEntry(1, "default", untagged_ports=["Port 1", "Port 6"]),
+        20: VlanEntry(20, "voice", tagged_ports=["Port 1"]),
+        30: VlanEntry(30, "data", tagged_ports=["Port 1"]),
+    }
+    switch = switch_with_state(
+        monkeypatch,
+        current,
+        ApplyPolicy(
+            allow_port_mode_change=allow,
+            backup_before_change=False,
+        ),
+    )
+    desired = DeviceConfig(ports={1: PortConfig(1, access_vlan=1)})
+    result = switch.apply(desired, check_mode=True)
+    assert result["changed"] is True
+    assert result["blocked"] is (not allow)
+    assert result["after"][1] == {"untagged_vlan": 1, "tagged_vlans": []}
+    switch._session.post.assert_not_called()
+    switch._save_backup.assert_not_called()
+    if not allow:
+        assert [v["type"] for v in result["violations"]] == ["port_mode_change"]
+        assert result["violations"][0]["current_mode"] == "trunk"
+        assert result["violations"][0]["desired_mode"] == "access"
+        with pytest.raises(JTComPolicyError) as exc:
+            switch.apply(desired)
+        assert exc.value.violations == result["violations"]
+        switch._session.post.assert_not_called()
+        switch._save_backup.assert_not_called()
+        switch._session.download_config_backup.assert_not_called()
+    else:
+        post = {1: current[1], 20: VlanEntry(20, "voice"), 30: VlanEntry(30, "data")}
+        ports = [PortSettings(pid, f"Port {pid}", True, "Auto", False) for pid in [1, 6]]
+        monkeypatch.setattr(
+            switch, "_read_current_state", MagicMock(side_effect=[(current, ports), (post, ports)])
+        )
+        monkeypatch.setattr(switch, "_verify_vlan_membership", MagicMock())
+        applied = switch.apply(desired)
+        assert applied["blocked"] is False
+        assert switch._session.post.call_count == 1
+        assert switch._session.post.call_args.kwargs["data"]["VlanType"] == "0"

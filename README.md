@@ -104,7 +104,9 @@ list are affected. Unlisted items are always left untouched.
   - `tagged_add`, `tagged_remove`, `tagged_set`
   - `untagged_add`, `untagged_remove`, `untagged_set`
 - Port-centric:
-  - `access_vlan`
+  - `access_vlan`: select access mode, set the untagged VLAN, and clear all tagged memberships.
+  It cannot be combined with `native_vlan` or any `trunk_*` field. A trunk-to-access
+  transition requires `allow_port_mode_change=True`.
   - `native_vlan`
   - `trunk_add_vlans`
   - `trunk_remove_vlans`

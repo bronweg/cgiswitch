@@ -22,7 +22,6 @@ from cgiswitch.utils.vlan_membership import make_port_state
 def test_port_config_validates_vlan_ids() -> None:
     PortConfig(
         port_id=5,
-        access_vlan=10,
         native_vlan=20,
         trunk_add_vlans=[30],
         trunk_remove_vlans=[40],
@@ -41,16 +40,14 @@ def test_port_config_validates_vlan_ids() -> None:
         PortConfig(port_id=5, access_vlan=True)  # type: ignore[arg-type]
 
 
-def test_access_and_native_vlan_can_coexist_with_trunk_lists() -> None:
-    cfg = PortConfig(
-        port_id=5,
-        access_vlan=10,
-        native_vlan=10,
-        trunk_add_vlans=[20],
-        trunk_remove_vlans=[30],
-    )
-    assert cfg.access_vlan == 10
-    assert cfg.trunk_add_vlans == [20]
+@pytest.mark.parametrize("field,value", [
+    ("native_vlan", 10), ("trunk_add_vlans", []), ("trunk_remove_vlans", []),
+    ("trunk_set_vlans", []), ("trunk_add_vlans", [20]),
+    ("trunk_remove_vlans", [20]), ("trunk_set_vlans", [20]),
+])
+def test_access_rejects_trunk_fields(field: str, value: object) -> None:
+    with pytest.raises(ValueError, match="access_vlan cannot be combined"):
+        PortConfig(port_id=5, access_vlan=10, **{field: value})
 
 
 def test_port_only_input_translates_to_vlan_ops() -> None:
@@ -60,7 +57,7 @@ def test_port_only_input_translates_to_vlan_ops() -> None:
         {
             5: PortConfig(
                 port_id=5,
-                access_vlan=10,
+                native_vlan=10,
                 trunk_add_vlans=[20],
                 trunk_remove_vlans=[30],
             )
@@ -425,3 +422,22 @@ def test_allow_untagged_move_does_not_suppress_dual_syntax_conflict(
                 ports={5: PortConfig(port_id=5, access_vlan=20)},
             )
         )
+
+
+def test_access_intent_rejects_vlan_centric_tagged_add() -> None:
+    with pytest.raises(DualSyntaxConflictError, match="access_vlan.*conflicts"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state(untagged_vlan=10)},
+            {20: VlanConfig(20, tagged_add=[5])},
+            {5: PortConfig(5, access_vlan=10)},
+            known_vlan_ids={10, 20},
+        )
+
+
+def test_native_vlan_preserves_existing_tags() -> None:
+    merged = merge_port_vlan_membership_inputs(
+        {5: make_port_state(untagged_vlan=10, tagged_vlans={20})},
+        {}, {5: PortConfig(5, native_vlan=30)}, known_vlan_ids={10, 20, 30},
+    )
+    assert set(merged) == {30}
+    assert merged[30].untagged_add == [5]

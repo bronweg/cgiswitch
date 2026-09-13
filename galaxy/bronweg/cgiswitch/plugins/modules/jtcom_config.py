@@ -86,7 +86,9 @@ options:
       C(access_vlan), C(native_vlan), C(trunk_add_vlans), C(trunk_remove_vlans),
       and C(trunk_set_vlans). Port-centric VLAN input is translated to the same
       canonical membership planner used for VLAN-centric syntax.
-      C(access_vlan) configures a canonical untagged access port.
+      C(access_vlan) selects access mode and clears existing tagged memberships.
+      It cannot be combined with C(native_vlan) or any C(trunk_*) field.
+      A trunk-to-access transition requires C(allow_port_mode_change=true).
       C(native_vlan) + C(trunk_*) configures a canonical trunk.
       Referenced VLANs must already exist or be declared under C(vlans:) with
       C(state: present). Set C(auto_create_referenced_vlans: true) to create

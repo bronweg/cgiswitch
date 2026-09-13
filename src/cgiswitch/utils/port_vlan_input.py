@@ -60,6 +60,14 @@ def merge_port_vlan_membership_inputs(
             _prepare_referenced_vlan(
                 result, known, port.access_vlan, auto_create_referenced_vlans, "port.access_vlan"
             )
+            tracker.record_access(port_id)
+            current_state = current_per_port.get(port_id)
+            tagged = current_state["tagged_vlans"] if current_state is not None else set()
+            if not isinstance(tagged, set):
+                raise TypeError("tagged_vlans must be set[int]")
+            for vlan_id in sorted(tagged):
+                tracker.record_tagged(port_id, vlan_id, "remove", "port.access_vlan")
+                _merge_port_op(result, vlan_id, "tagged", "remove", port_id)
             tracker.record_untagged(port_id, port.access_vlan, "port.access_vlan")
             _merge_port_op(result, port.access_vlan, "untagged", "add", port_id)
 
@@ -287,6 +295,14 @@ class _ConflictTracker:
         self._untagged_removes: dict[tuple[int, int], str] = {}
         self._tagged_ops: dict[tuple[int, int], tuple[MembershipOp, str]] = {}
         self._trunk_set_ports: dict[int, set[int]] = {}
+
+    def record_access(self, port_id: int) -> None:
+        for (existing_port, vlan_id), (op, source) in self._tagged_ops.items():
+            if existing_port == port_id and op == "add":
+                raise DualSyntaxConflictError(
+                    f"access_vlan for port_id={port_id} conflicts with tagged VLAN "
+                    f"{vlan_id} from {source}."
+                )
 
     def record_untagged(self, port_id: int, vlan_id: int, source: str) -> None:
         existing = self._untagged_assignments.get(port_id)
