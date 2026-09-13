@@ -12,6 +12,7 @@ from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
 from cgiswitch.model.port import PortOperStatus, PortSettings
 from cgiswitch.model.vlan import VlanConfig, VlanEntry
 from cgiswitch.switch import JTComSwitch
+from cgiswitch.utils.device_diff import build_device_plan
 
 
 def test_connection_and_policy_options_are_typed_and_frozen() -> None:
@@ -77,37 +78,68 @@ def test_typed_read_helpers_return_parser_models(monkeypatch: pytest.MonkeyPatch
     assert switch.read_vlans() == vlans
 
 
-def test_per_call_policy_does_not_mutate_stored_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    base = ApplyPolicy(allow_untagged_move=False)
-    override = ApplyPolicy(allow_untagged_move=True)
-    switch = JTComSwitch("192.0.2.1", "admin", "secret", policy=base)
+def test_apply_uses_constructor_policy_for_membership_planning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = ApplyPolicy(
+        safety_port_id=7,
+        allow_port_mode_change=True,
+        allow_untagged_move=True,
+        allow_vlan_delete_in_use=True,
+    )
+    switch = JTComSwitch("192.0.2.1", "admin", "secret", policy=policy)
     switch._session = MagicMock()
     monkeypatch.setattr(switch, "_read_current_state", lambda _session: ({}, []))
-    seen: list[bool] = []
+    seen: list[ApplyPolicy] = []
+    build_plan = MagicMock(wraps=build_device_plan)
+    monkeypatch.setattr("cgiswitch.switch.build_device_plan", build_plan)
 
     def plan(*_args: object, **kwargs: object) -> MagicMock:
-        seen.append(bool(kwargs["allow_untagged_move"]))
+        policy_arg = kwargs["policy"]
+        assert isinstance(policy_arg, ApplyPolicy)
+        seen.append(policy_arg)
         return MagicMock(changed_ports=[], warnings=[])
 
     monkeypatch.setattr(switch, "_plan_vlan_membership", plan)
-    result = switch.apply(DeviceConfig(), policy=override, check_mode=True)
-    result_default = switch.apply(DeviceConfig(), check_mode=True)
+    result = switch.apply(DeviceConfig(), check_mode=True)
 
     assert result["changed"] is False
-    assert result_default["changed"] is False
-    assert switch.policy is base
-    assert seen == [True, False]
+    assert switch.policy is policy
+    assert seen == [policy]
+    assert build_plan.call_args.kwargs["safety_port_id"] == 7
 
 
-def test_apply_routes_per_call_backup_policy_without_mutating_default(
+def test_apply_rejects_policy_keyword_before_reads_or_writes() -> None:
+    switch = JTComSwitch("192.0.2.1", "admin", "secret")
+    session = MagicMock()
+    switch._session = session
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'policy'"):
+        switch.apply(DeviceConfig(), policy=ApplyPolicy())  # type: ignore[call-arg]
+
+    session.assert_not_called()
+    session.get.assert_not_called()
+    session.post.assert_not_called()
+    session.download_config_backup.assert_not_called()
+
+
+def test_apply_uses_constructor_backup_policy(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    enabled_dir = tmp_path / "enabled-backups"
     switch = JTComSwitch(
         "192.0.2.1",
         "admin",
         "secret",
-        policy=ApplyPolicy(backup_before_change=False),
+        policy=ApplyPolicy(
+            safety_port_id=9,
+            backup_before_change=True,
+            backup_dir=enabled_dir,
+            allow_port_mode_change=True,
+            allow_untagged_move=True,
+            allow_vlan_delete_in_use=True,
+        ),
     )
     session = MagicMock()
     switch._session = session
@@ -116,27 +148,27 @@ def test_apply_routes_per_call_backup_policy_without_mutating_default(
         {10: VlanEntry(vlan_id=10, name="v10")},
         [],
     )
-    monkeypatch.setattr(
-        switch,
-        "_read_current_state",
-        MagicMock(side_effect=[current, post, current, post]),
-    )
+    monkeypatch.setattr(switch, "_read_current_state", MagicMock(side_effect=[current, post]))
     monkeypatch.setattr("cgiswitch.switch.vlan_create", MagicMock())
     session.download_config_backup.return_value = b"backup"
     desired = DeviceConfig(vlans={10: VlanConfig(vlan_id=10, name="v10")})
 
-    override_dir = tmp_path / "override-backups"
-    first = switch.apply(
-        desired,
-        policy=ApplyPolicy(backup_before_change=True, backup_dir=override_dir),
-    )
+    first = switch.apply(desired)
     backup_path = first["backup_file"]
     assert backup_path
-    assert backup_path.startswith(str(override_dir))
-    assert (override_dir / backup_path.rsplit("/", 1)[-1]).read_bytes() == b"backup"
-    assert switch.policy.backup_before_change is False
+    assert backup_path.startswith(str(enabled_dir))
+    assert (enabled_dir / backup_path.rsplit("/", 1)[-1]).read_bytes() == b"backup"
+    assert switch.policy.safety_port_id == 9
 
-    second = switch.apply(desired, policy=ApplyPolicy(backup_before_change=False))
+    disabled = JTComSwitch(
+        "192.0.2.1",
+        "admin",
+        "secret",
+        policy=ApplyPolicy(backup_before_change=False),
+    )
+    disabled._session = session
+    monkeypatch.setattr(disabled, "_read_current_state", MagicMock(side_effect=[current, post]))
+    second = disabled.apply(desired)
     assert second["backup_file"] == ""
     assert session.download_config_backup.call_count == 1
 

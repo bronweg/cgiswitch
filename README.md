@@ -37,8 +37,9 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-The URLs above target the planned repository name. Until the maintainer
-publishes that rename, use your existing checkout or clone URL.
+After merging the revival stack, the maintainer must manually rename the
+GitHub repository from `napalm-jtcom` to `cgiswitch`. The URLs above target that
+future name; until the rename, use the existing checkout or repository URL.
 
 ---
 
@@ -201,7 +202,10 @@ with JTComSwitch(
     print(result["diff"])
 ```
 
-### Policy Override Example
+### Instance Policy Example
+
+Set the policy when constructing the switch. Every `apply()` call uses that
+instance policy; per-call policy overrides are not supported.
 
 ```python
 from cgiswitch import ApplyPolicy, JTComConnectionOptions, JTComSwitch
@@ -213,8 +217,9 @@ policy = ApplyPolicy(allow_vlan_delete_in_use=True)
 with JTComSwitch(
     "192.0.2.1", "admin", "secret",
     connection=JTComConnectionOptions(verify_tls=False),
+    policy=policy,
 ) as switch:
-    result = switch.apply(desired, policy=policy, check_mode=True)
+    result = switch.apply(desired, check_mode=True)
     print(result["warnings"])
 ```
 

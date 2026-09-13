@@ -65,7 +65,7 @@ class JTComSwitch:
         username: Login username.
         password: Login password.
         connection: Typed HTTP connection settings.
-        policy: Default typed apply policy.
+        policy: Instance policy used by every apply call.
     """
 
     def __init__(
@@ -90,9 +90,6 @@ class JTComSwitch:
         )
         self.timeout = self.connection.timeout
         self._session: JTComSession | None = None
-        self._allow_port_mode_change = self.policy.allow_port_mode_change
-        self._allow_untagged_move = self.policy.allow_untagged_move
-        self._allow_vlan_delete_in_use = self.policy.allow_vlan_delete_in_use
 
         logger.debug(
             "JTComSwitch initialised: host=%s port=%d user=%s",
@@ -172,7 +169,6 @@ class JTComSwitch:
         self,
         desired: DeviceConfig,
         *,
-        policy: ApplyPolicy | None = None,
         check_mode: bool = False,
     ) -> dict[str, Any]:
         """Apply an incremental device configuration to the switch idempotently.
@@ -188,7 +184,7 @@ class JTComSwitch:
         Args:
             desired: Incremental :class:`~cgiswitch.model.config.DeviceConfig`.
             check_mode: If ``True``, return the plan without applying anything.
-            policy: Per-call policy override. The stored policy is not changed.
+                The instance policy configured at construction is used.
 
         Returns:
             A dict with keys:
@@ -204,8 +200,7 @@ class JTComSwitch:
                 differences between the switch state and *desired*.
         """
         session = self._require_session()
-        effective_policy = policy or self.policy
-        safety_port_id = effective_policy.safety_port_id
+        safety_port_id = self.policy.safety_port_id
 
         # --- Read and normalize current state ---
         current_vlans, current_ports = self._read_current_state(session)
@@ -239,9 +234,7 @@ class JTComSwitch:
             current_ports,
             desired_plan_n.vlans,
             check_mode=check_mode,
-            allow_port_mode_change=effective_policy.allow_port_mode_change,
-            allow_untagged_move=effective_policy.allow_untagged_move,
-            allow_vlan_delete_in_use=effective_policy.allow_vlan_delete_in_use,
+            policy=self.policy,
         )
         if membership_plan.changed_ports or membership_plan.warnings:
             diff["vlan_membership"] = {
@@ -277,8 +270,8 @@ class JTComSwitch:
             }
 
         # --- Backup before change ---
-        do_backup = effective_policy.backup_before_change
-        backup_file = self._save_backup(session, effective_policy.backup_dir) if do_backup else ""
+        do_backup = self.policy.backup_before_change
+        backup_file = self._save_backup(session, self.policy.backup_dir) if do_backup else ""
 
         # --- Apply VLAN creates and renames before membership changes ---
         applied: list[str] = []
@@ -347,32 +340,17 @@ class JTComSwitch:
         desired_vlans: dict[int, VlanConfig],
         *,
         check_mode: bool,
-        allow_port_mode_change: bool | None,
-        allow_untagged_move: bool | None,
-        allow_vlan_delete_in_use: bool | None,
+        policy: ApplyPolicy,
     ) -> VlanMembershipPlan:
         """Build a canonical VLAN membership plan from current switch state."""
         known_ports = [settings.port_id for settings in current_ports]
         current_per_port = build_current_per_port_from_vlans(current_vlans, known_ports)
-        allow = (
-            self._allow_port_mode_change
-            if allow_port_mode_change is None
-            else allow_port_mode_change
-        )
-        allow_move = (
-            self._allow_untagged_move if allow_untagged_move is None else allow_untagged_move
-        )
-        allow_delete_in_use = (
-            self._allow_vlan_delete_in_use
-            if allow_vlan_delete_in_use is None
-            else allow_vlan_delete_in_use
-        )
         return plan_vlan_membership_changes(
             current_per_port,
             desired_vlans.values(),
-            allow_port_mode_change=allow,
-            allow_untagged_move=allow_move,
-            allow_vlan_delete_in_use=bool(allow_delete_in_use),
+            allow_port_mode_change=policy.allow_port_mode_change,
+            allow_untagged_move=policy.allow_untagged_move,
+            allow_vlan_delete_in_use=policy.allow_vlan_delete_in_use,
             check_mode=check_mode,
         )
 
