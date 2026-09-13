@@ -37,6 +37,58 @@ _VLAN_TYPE_ACCESS: str = "0"
 _VLAN_TYPE_TRUNK: str = "1"
 
 
+def build_vlan_create_payload(
+    vlan_id: int,
+    name: str | None = None,
+) -> dict[str, str]:
+    """Build the form payload used to create or rename a static VLAN."""
+    return {"vlanid": str(vlan_id), "vlanname": name or "", "cmd": "add"}
+
+
+def build_vlan_delete_payload(vlan_ids: list[int]) -> list[tuple[str, str]]:
+    """Build a form payload that deletes the supplied static VLANs."""
+    safe_ids = [vlan_id for vlan_id in vlan_ids if vlan_id != 1]
+    if not safe_ids:
+        raise ValueError("vlan_ids must contain at least one deletable VLAN (not 1)")
+    form_fields = [("del", str(vlan_id)) for vlan_id in sorted(safe_ids)]
+    form_fields.append(("cmd", "del"))
+    return form_fields
+
+
+def build_vlan_port_payload(
+    port_ids: list[int],
+    vlan_type: str,
+    access_vlan: int | None,
+    native_vlan: int | None,
+    permit_vlans: list[int],
+) -> dict[str, str]:
+    """Build the JTCom form payload for one or more port VLAN settings."""
+    if not port_ids:
+        raise ValueError("port_ids must not be empty")
+    if any(port_id < 1 for port_id in port_ids):
+        raise ValueError(f"port_ids must be 1-based positive integers, got {port_ids!r}")
+    vt_lower = vlan_type.lower()
+    if vt_lower not in {"access", "trunk"}:
+        raise ValueError(f"vlan_type must be 'access' or 'trunk', got {vlan_type!r}")
+
+    port_id_str = "_".join(str(port_id - 1) for port_id in sorted(port_ids))
+    if vt_lower == "access":
+        vlan_type_val = _VLAN_TYPE_ACCESS
+        av = str(access_vlan) if access_vlan is not None else "1"
+        nv, pv = "1", ""
+    else:
+        vlan_type_val = _VLAN_TYPE_TRUNK
+        av, nv = "1", str(native_vlan) if native_vlan is not None else "1"
+        pv = "_".join(str(vlan_id) for vlan_id in sorted(permit_vlans))
+    return {
+        "PortId": port_id_str,
+        "VlanType": vlan_type_val,
+        "AccessVlan": av,
+        "NativeVlan": nv,
+        "PermitVlan": pv,
+    }
+
+
 def vlan_create(
     session: JTComSession,
     vlan_id: int,
@@ -54,14 +106,7 @@ def vlan_create(
         JTComSwitchError: If the switch returns a non-zero response code.
     """
     logger.debug("Creating VLAN %d (name=%r)", vlan_id, name)
-    session.post(
-        VLAN_CREATE_DELETE,
-        data={
-            "vlanid": str(vlan_id),
-            "vlanname": name or "",
-            "cmd": "add",
-        },
-    )
+    session.post(VLAN_CREATE_DELETE, data=build_vlan_create_payload(vlan_id, name))
 
 
 def vlan_delete(
@@ -81,18 +126,8 @@ def vlan_delete(
         ValueError: If *vlan_ids* is empty after filtering out VLAN 1.
         JTComSwitchError: If the switch returns a non-zero response code.
     """
-    safe_ids = [v for v in vlan_ids if v != 1]
-    if not safe_ids:
-        raise ValueError("vlan_ids must contain at least one deletable VLAN (not 1)")
-
-    logger.debug("Deleting VLANs %s", safe_ids)
-
-    # requests.Session.post() with data= only sends one value per key when
-    # data is a dict.  Pass a list of tuples so repeated del= keys are preserved.
-    # session.post() injects page=inside and handles code=11 auth-expiry retry.
-    form_fields: list[tuple[str, str]] = [("del", str(v)) for v in sorted(safe_ids)]
-    form_fields.append(("cmd", "del"))
-    session.post(VLAN_CREATE_DELETE, data=form_fields)
+    logger.debug("Deleting VLANs %s", vlan_ids)
+    session.post(VLAN_CREATE_DELETE, data=build_vlan_delete_payload(vlan_ids))
 
 
 def vlan_set_port(
@@ -122,38 +157,19 @@ def vlan_set_port(
         ValueError: If *port_ids* is empty or *vlan_type* is invalid.
         JTComSwitchError: If the switch returns a non-zero response code.
     """
-    if not port_ids:
-        raise ValueError("port_ids must not be empty")
-    if any(port_id < 1 for port_id in port_ids):
-        raise ValueError(f"port_ids must be 1-based positive integers, got {port_ids!r}")
-    vt_lower = vlan_type.lower()
-    if vt_lower not in {"access", "trunk"}:
-        raise ValueError(f"vlan_type must be 'access' or 'trunk', got {vlan_type!r}")
-
-    port_id_str = "_".join(str(p - 1) for p in sorted(port_ids))
-
-    if vt_lower == "access":
-        vlan_type_val = _VLAN_TYPE_ACCESS
-        av = str(access_vlan) if access_vlan is not None else "1"
-        nv = "1"
-        pv = ""
-    else:
-        vlan_type_val = _VLAN_TYPE_TRUNK
-        av = "1"
-        nv = str(native_vlan) if native_vlan is not None else "1"
-        pv = "_".join(str(v) for v in sorted(permit_vlans))
+    payload = build_vlan_port_payload(
+        port_ids, vlan_type, access_vlan, native_vlan, permit_vlans,
+    )
 
     logger.debug(
         "Setting port(s) %s → %s (AccessVlan=%s NativeVlan=%s PermitVlan=%s)",
-        port_id_str, vlan_type, av, nv, pv,
+        payload["PortId"],
+        vlan_type,
+        payload["AccessVlan"],
+        payload["NativeVlan"],
+        payload["PermitVlan"],
     )
     session.post(
         VLAN_PORT_SET,
-        data={
-            "PortId": port_id_str,
-            "VlanType": vlan_type_val,
-            "AccessVlan": av,
-            "NativeVlan": nv,
-            "PermitVlan": pv,
-        },
+        data=payload,
     )

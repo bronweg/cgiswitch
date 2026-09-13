@@ -246,6 +246,31 @@ applied:
   type: list
   elements: str
   returned: always
+completed_operations:
+  description: Ordered operation records completed before a failure, or on success.
+  type: list
+  elements: dict
+  returned: always
+failed_operation:
+  description: Operation record that failed, when an apply failure occurs.
+  type: dict
+  returned: on failure
+original_exception:
+  description: Type and message of the original apply exception.
+  type: dict
+  returned: on failure
+readback:
+  description: Best-effort device readback captured after a partial failure.
+  type: dict
+  returned: on failure
+readback_error:
+  description: Type and message of a failed best-effort readback.
+  type: dict
+  returned: on failure
+write_attempted:
+  description: Whether any write may have been attempted before failure.
+  type: bool
+  returned: on failure
 warnings:
   description: >
     Advisory warning objects for permitted risks and explicit fallback behavior.

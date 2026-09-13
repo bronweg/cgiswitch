@@ -29,6 +29,64 @@ class JTComPolicyError(JTComError):
         ))
 
 
+class JTComApplyError(JTComError):
+    """Describe a failure after an apply operation may have started.
+
+    The original exception is retained for callers that need its concrete
+    type, while :meth:`as_result` provides a JSON-serializable summary for
+    automation interfaces.
+    """
+
+    def __init__(
+        self,
+        *,
+        backup_file: str,
+        completed_operations: list[dict[str, str]],
+        failed_operation: dict[str, str],
+        original_exception: Exception,
+        write_attempted: bool,
+        readback: dict[str, Any] | None = None,
+        readback_error: Exception | None = None,
+    ) -> None:
+        self.backup_file = backup_file
+        self.completed_operations = completed_operations
+        self.failed_operation = failed_operation
+        self.original_exception = original_exception
+        self.write_attempted = write_attempted
+        self.readback = readback
+        self.readback_error = readback_error
+        self.applied = [operation["key"] for operation in completed_operations]
+        super().__init__(
+            f"Apply failed during {failed_operation.get('key', 'unknown operation')}: "
+            f"{original_exception}"
+        )
+
+    @staticmethod
+    def _exception_result(error: Exception | None) -> dict[str, str] | None:
+        if error is None:
+            return None
+        return {"type": type(error).__name__, "message": str(error)}
+
+    def as_result(self) -> dict[str, Any]:
+        """Return a stable, JSON-serializable failure result."""
+        result: dict[str, Any] = {
+            "failed": True,
+            "msg": str(self),
+            "changed": self.write_attempted,
+            "backup_file": self.backup_file,
+            "applied": self.applied,
+            "completed_operations": self.completed_operations,
+            "failed_operation": self.failed_operation,
+            "original_exception": self._exception_result(self.original_exception),
+            "readback": self.readback,
+            "readback_error": self._exception_result(self.readback_error),
+            "write_attempted": self.write_attempted,
+        }
+        if isinstance(self.original_exception, JTComVerificationError):
+            result["remaining_diff"] = self.original_exception.remaining_diff
+        return result
+
+
 class JTComStateError(JTComError):
     """Raised when parsed device pages describe inconsistent current state."""
 

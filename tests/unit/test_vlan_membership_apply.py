@@ -261,7 +261,9 @@ def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
             "permit_vlans": [1, 61],
         }
 
-    monkeypatch.setattr("cgiswitch.switch.canonical_to_jtcom_port_vlan_state", fake_compile)
+    monkeypatch.setattr(
+        "cgiswitch.utils.operations.canonical_to_jtcom_port_vlan_state", fake_compile,
+    )
     plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
         desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
