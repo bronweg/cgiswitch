@@ -1,4 +1,4 @@
-"""Unit tests for napalm_jtcom.parser.device and napalm_jtcom.model.device."""
+"""Unit tests for cgiswitch.parser.device and cgiswitch.model.device."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import pathlib
 
 import pytest
 
-from napalm_jtcom.client.errors import JTComParseError
-from napalm_jtcom.model.device import DeviceInfo
-from napalm_jtcom.parser.device import (
+from cgiswitch.client.errors import JTComParseError
+from cgiswitch.model.device import DeviceInfo
+from cgiswitch.parser.device import (
     parse_device_info,
     parse_uptime_seconds,
 )

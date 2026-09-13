@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "napalm-jtcom"
+name = "cgiswitch"
 version = "0.1.0"
-description = "NAPALM community driver for JTCom CGI-based Ethernet switches"
+description = "Declarative Python and Ansible tooling for JTCom CGI-based Ethernet switches"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "napalm-jtcom contributors" }]
-keywords = ["napalm", "network", "automation", "jtcom", "switch", "cgi"]
+authors = [{ name = "cgiswitch contributors" }]
+keywords = ["network", "automation", "jtcom", "switch", "cgi"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -23,7 +23,6 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "napalm",
     "requests",
     "beautifulsoup4",
     "lxml",
@@ -41,15 +40,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bronweg/napalm-jtcom"
-Repository = "https://github.com/bronweg/napalm-jtcom"
-"Bug Tracker" = "https://github.com/bronweg/napalm-jtcom/issues"
-
-[project.entry-points."napalm.drivers"]
-jtcom = "napalm_jtcom.driver:JTComDriver"
+Homepage = "https://github.com/bronweg/cgiswitch"
+Repository = "https://github.com/bronweg/cgiswitch"
+"Bug Tracker" = "https://github.com/bronweg/cgiswitch/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/napalm_jtcom"]
+packages = ["src/cgiswitch"]
 
 [tool.ruff]
 line-length = 100
@@ -67,9 +63,9 @@ warn_unused_configs = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["napalm.*", "bs4.*", "ansible.*"]
+module = ["bs4.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=napalm_jtcom --cov-report=term-missing --cov-report=html"
+addopts = "--cov=cgiswitch --cov-report=term-missing --cov-report=html"

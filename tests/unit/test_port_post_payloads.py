@@ -1,4 +1,4 @@
-"""Unit tests for port POST payload formation in napalm_jtcom.client.port_ops.
+"""Unit tests for port POST payload formation in cgiswitch.client.port_ops.
 
 Verifies that the correct form fields are built and sent to the switch,
 without requiring a real device.  Uses the ``responses`` library to
@@ -13,12 +13,12 @@ from unittest.mock import MagicMock
 import pytest
 import responses as responses_lib
 
-from napalm_jtcom.client.port_ops import (
+from cgiswitch.client.port_ops import (
     SPEED_TOKEN_TO_CODE,
     _build_port_payload,
     apply_port_changes,
 )
-from napalm_jtcom.model.port import PortChangeSet, PortConfig, PortSettings
+from cgiswitch.model.port import PortChangeSet, PortConfig, PortSettings
 
 _BASE = "http://192.168.1.1"
 _OK = json.dumps({"code": 0, "data": ""})
@@ -26,7 +26,7 @@ _ERR = json.dumps({"code": 1, "data": "param error"})
 
 
 def _mock_session(base_url: str = _BASE) -> MagicMock:
-    from napalm_jtcom.client.session import JTComCredentials, JTComSession
+    from cgiswitch.client.session import JTComCredentials, JTComSession
     session = JTComSession(
         base_url=base_url,
         credentials=JTComCredentials("admin", "admin"),
@@ -198,7 +198,7 @@ class TestApplyPortChanges:
             body=_ERR,
             content_type="application/json",
         )
-        from napalm_jtcom.client.errors import JTComSwitchError
+        from cgiswitch.client.errors import JTComSwitchError
         session = _mock_session()
         current = [make_settings(1)]
         change_set = PortChangeSet(update=[PortConfig(port_id=1, admin_up=False)])

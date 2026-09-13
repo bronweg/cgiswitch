@@ -12,12 +12,11 @@ tags:
 - switch
 - jtcom
 - cgi
-- napalm
-homepage: https://github.com/bronweg/napalm-jtcom
-repository: https://github.com/bronweg/napalm-jtcom
-documentation: https://github.com/bronweg/napalm-jtcom
-issues: https://github.com/bronweg/napalm-jtcom/issues
+homepage: https://github.com/bronweg/cgiswitch
+repository: https://github.com/bronweg/cgiswitch
+documentation: https://github.com/bronweg/cgiswitch
+issues: https://github.com/bronweg/cgiswitch/issues
 authors:
-- napalm-jtcom contributors
+- cgiswitch contributors
 dependencies: {}
 build_ignore: []

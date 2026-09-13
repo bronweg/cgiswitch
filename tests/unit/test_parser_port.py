@@ -1,4 +1,4 @@
-"""Unit tests for napalm_jtcom.parser.port and napalm_jtcom.model.port."""
+"""Unit tests for cgiswitch.parser.port and cgiswitch.model.port."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import pathlib
 
 import pytest
 
-from napalm_jtcom.client.errors import JTComParseError
-from napalm_jtcom.model.port import PortOperStatus, PortSettings
-from napalm_jtcom.parser.port import (
+from cgiswitch.client.errors import JTComParseError
+from cgiswitch.model.port import PortOperStatus, PortSettings
+from cgiswitch.parser.port import (
     _parse_actual_speed,
     parse_port_page,
     parse_port_settings,

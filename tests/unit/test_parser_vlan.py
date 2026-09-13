@@ -1,4 +1,4 @@
-"""Unit tests for napalm_jtcom.parser.vlan."""
+"""Unit tests for cgiswitch.parser.vlan."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import pathlib
 
 import pytest
 
-from napalm_jtcom.client.errors import JTComParseError
-from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
+from cgiswitch.client.errors import JTComParseError
+from cgiswitch.parser.vlan import parse_port_vlan_settings, parse_static_vlans
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 

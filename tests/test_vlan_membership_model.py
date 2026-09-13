@@ -2,7 +2,7 @@
 
 import pytest
 
-from napalm_jtcom.model.vlan import VlanConfig
+from cgiswitch.model.vlan import VlanConfig
 
 
 class TestVlanConfigMembershipModel:

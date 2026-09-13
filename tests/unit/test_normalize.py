@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from napalm_jtcom.model.config import DeviceConfig
-from napalm_jtcom.model.port import PortConfig
-from napalm_jtcom.model.vlan import VlanConfig
-from napalm_jtcom.utils.normalize import (
+from cgiswitch.model.config import DeviceConfig
+from cgiswitch.model.port import PortConfig
+from cgiswitch.model.vlan import VlanConfig
+from cgiswitch.utils.normalize import (
     normalize_device_config,
     normalize_port_config,
     normalize_vlan_config,

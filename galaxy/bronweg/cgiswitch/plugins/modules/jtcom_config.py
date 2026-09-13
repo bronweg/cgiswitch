@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-# Copyright: (c) 2024, napalm-jtcom contributors
+# Copyright: (c) 2024, cgiswitch contributors
 # SPDX-License-Identifier: MIT
 """Ansible module stub: bronweg.cgiswitch.jtcom_config.
 
 All execution logic lives in plugins/action/jtcom_config.py which runs in the
-Ansible controller Python process and imports napalm_jtcom directly.
+Ansible controller Python process and imports cgiswitch directly.
 This file exists only for argument documentation (ansible-doc, Galaxy, IDEs).
 """
 from __future__ import annotations
@@ -15,10 +15,11 @@ module: jtcom_config
 short_description: Configure JTCom CGI Ethernet switches
 description:
   - Idempotent configuration of VLANs and ports on JTCom-compatible L2 switches.
-  - Wraps napalm-jtcom C(apply_device_config()) for deterministic, diff-aware apply.
+  - Wraps cgiswitch C(apply()) for deterministic, diff-aware apply.
   - Supports Ansible check mode (dry-run) natively.
   - Ports are 1-based everywhere.
-  - VLAN membership input uses canonical on-wire semantics: C(untagged) means
+  - >-
+    VLAN membership input uses canonical on-wire semantics: C(untagged) means
     the VLAN sent untagged on wire, and C(tagged) means VLANs sent tagged on wire.
 options:
   host:
@@ -86,7 +87,7 @@ options:
     type: dict
 notes:
   - "Run this module on the Ansible controller (C(connection: local))."
-  - napalm-jtcom must be installed in the Python environment used by Ansible.
+  - cgiswitch must be installed in the Python environment used by Ansible.
   - Use C(--check) for a safe dry-run that shows planned changes without applying them.
   - Untagged/native VLAN moves are blocked by default.
   - VLAN delete-in-use is blocked by default.
@@ -94,9 +95,9 @@ notes:
   - If a changed port would otherwise have no VLAN membership, it is mapped to
     access VLAN 1 and a structured warning is returned.
 requirements:
-  - napalm-jtcom >= 0.8.0
+  - cgiswitch == 0.1.0
 author:
-  - napalm-jtcom contributors
+  - cgiswitch contributors
 """
 
 EXAMPLES = r"""
@@ -185,7 +186,7 @@ changed:
   returned: always
 diff:
   description: >
-    Structured diff dict from the napalm-jtcom plan engine, containing
+    Structured diff dict from the cgiswitch plan engine, containing
     C(summary), C(total_changes), and C(changes) list.
   type: dict
   returned: always

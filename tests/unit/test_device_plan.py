@@ -6,10 +6,10 @@ from typing import Literal
 
 import pytest
 
-from napalm_jtcom.model.config import DeviceConfig
-from napalm_jtcom.model.port import PortConfig
-from napalm_jtcom.model.vlan import VlanConfig
-from napalm_jtcom.utils.device_diff import build_device_plan
+from cgiswitch.model.config import DeviceConfig
+from cgiswitch.model.port import PortConfig
+from cgiswitch.model.vlan import VlanConfig
+from cgiswitch.utils.device_diff import build_device_plan
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,7 +194,7 @@ def test_vlan_update_unknown_baseline_add_remove_has_structured_meta() -> None:
 def test_new_vlan_create_unknown_membership_is_internal_invariant_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from napalm_jtcom.utils import device_diff as dd
+    from cgiswitch.utils import device_diff as dd
 
     monkeypatch.setattr(
         dd,

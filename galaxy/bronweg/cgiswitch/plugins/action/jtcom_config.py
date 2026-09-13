@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-# Copyright: (c) 2024, napalm-jtcom contributors
+# Copyright: (c) 2024, cgiswitch contributors
 # SPDX-License-Identifier: MIT
 """Ansible action plugin: bronweg.cgiswitch.jtcom_config.
 
-Runs entirely in the Ansible controller Python process — napalm_jtcom is
+Runs entirely in the Ansible controller Python process — cgiswitch is
 imported directly with no subprocess or bootstrap tricks required.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from ansible.plugins.action import ActionBase
 
 
 class ActionModule(ActionBase):  # type: ignore[misc]
-    """Idempotent configuration of JTCom CGI switches via napalm_jtcom."""
+    """Idempotent configuration of JTCom CGI switches via cgiswitch."""
 
     TRANSFERS_FILES = False
 
@@ -31,13 +31,14 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 return dict(failed=True, msg=f"Parameter '{key}' is required.")
 
         try:
-            from napalm_jtcom.client.errors import JTComError
-            from napalm_jtcom.driver import JTComDriver
-            from napalm_jtcom.model.config import DeviceConfig
-            from napalm_jtcom.model.port import PortConfig
-            from napalm_jtcom.model.vlan import VlanConfig
+            from cgiswitch.client.errors import JTComError
+            from cgiswitch.model.config import DeviceConfig
+            from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
+            from cgiswitch.model.port import PortConfig
+            from cgiswitch.model.vlan import VlanConfig
+            from cgiswitch.switch import JTComSwitch
         except ImportError as exc:
-            return dict(failed=True, msg=f"napalm_jtcom is not installed: {exc}")
+            return dict(failed=True, msg=f"cgiswitch is not installed: {exc}")
 
         vlans: dict[int, Any] = {}
         for key, entry in (p.get("vlans") or {}).items():
@@ -75,31 +76,33 @@ class ActionModule(ActionBase):  # type: ignore[misc]
 
         desired = DeviceConfig(vlans=vlans, ports=ports)
 
-        optional_args: dict[str, Any] = {
-            "verify_tls": p.get("verify_tls", True),
-            "backup_before_change": p.get("backup_before_change", True),
-            "safety_port_id": 6,
-            "allow_port_mode_change": p.get("allow_port_mode_change", False),
-            "allow_untagged_move": p.get("allow_untagged_move", False),
-        }
-        if "allow_vlan_delete_in_use" in p:
-            optional_args["allow_vlan_delete_in_use"] = p.get("allow_vlan_delete_in_use")
+        connection = JTComConnectionOptions(
+            verify_tls=p.get("verify_tls", True),
+        )
+        policy = ApplyPolicy(
+            backup_before_change=p.get("backup_before_change", True),
+            safety_port_id=6,
+            allow_port_mode_change=p.get("allow_port_mode_change", False),
+            allow_untagged_move=p.get("allow_untagged_move", False),
+            allow_vlan_delete_in_use=p.get("allow_vlan_delete_in_use", False),
+        )
 
         try:
-            driver = JTComDriver(
+            switch = JTComSwitch(
                 hostname=p["host"],
                 username=p["username"],
                 password=p["password"],
-                optional_args=optional_args,
+                connection=connection,
+                policy=policy,
             )
-            driver.open()
+            switch.open()
             try:
-                cfg_result = driver.apply_device_config(
+                cfg_result = switch.apply(
                     desired,
                     check_mode=self._play_context.check_mode,
                 )
             finally:
-                driver.close()
+                switch.close()
         except (JTComError, ValueError, ConnectionError) as exc:
             return dict(failed=True, msg=str(exc))
 

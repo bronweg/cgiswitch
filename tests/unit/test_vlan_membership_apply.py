@@ -10,11 +10,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from napalm_jtcom.client.errors import JTComVerificationError
-from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.port import PortSettings
-from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
-from napalm_jtcom.utils.vlan_membership import (
+from cgiswitch.client.errors import JTComVerificationError
+from cgiswitch.model.config import DeviceConfig
+from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
+from cgiswitch.model.port import PortSettings
+from cgiswitch.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
+from cgiswitch.switch import JTComSwitch
+from cgiswitch.utils.vlan_membership import (
     PortMembershipMap,
     VlanDeleteInUseError,
     VlanMembershipModeChangeError,
@@ -182,7 +184,7 @@ def test_canonical_compilation_produces_full_final_permit_list_not_delta() -> No
 
 
 def test_driver_apply_compiles_canonical_state_at_final_boundary() -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
     plan = VlanMembershipPlan(
         current_per_port={4: make_port_state(), 5: make_port_state(tagged_vlans={20})},
@@ -195,7 +197,7 @@ def test_driver_apply_compiles_canonical_state_at_final_boundary() -> None:
         warnings=[],
     )
 
-    driver._apply_vlan_membership_plan(session, plan)
+    switch._apply_vlan_membership_plan(session, plan)
 
     session.post.assert_called_once()
     endpoint = session.post.call_args.args[0]
@@ -210,7 +212,7 @@ def test_driver_apply_compiles_canonical_state_at_final_boundary() -> None:
 def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
     seen: list[dict[str, object]] = []
 
@@ -223,7 +225,7 @@ def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
             "permit_vlans": [1, 61],
         }
 
-    monkeypatch.setattr("napalm_jtcom.driver.canonical_to_jtcom_port_vlan_state", fake_compile)
+    monkeypatch.setattr("cgiswitch.switch.canonical_to_jtcom_port_vlan_state", fake_compile)
     plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
         desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
@@ -232,7 +234,7 @@ def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
         warnings=[],
     )
 
-    driver._apply_vlan_membership_plan(session, plan)
+    switch._apply_vlan_membership_plan(session, plan)
 
     assert seen == [make_port_state(untagged_vlan=1, tagged_vlans={61})]
     payload = session.post.call_args.kwargs["data"]
@@ -241,13 +243,13 @@ def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
 
 
 def test_apply_boundary_rejects_tagged_only_canonical_state_clearly() -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
 
     with pytest.raises(
         ValueError,
         match="Port 5 canonical state cannot be compiled to JTCom backend",
     ):
-        driver._apply_vlan_membership_plan(
+        switch._apply_vlan_membership_plan(
             MagicMock(),
             VlanMembershipPlan(
                 current_per_port={5: make_port_state()},
@@ -260,13 +262,13 @@ def test_apply_boundary_rejects_tagged_only_canonical_state_clearly() -> None:
 
 
 def test_apply_boundary_rejects_empty_canonical_state_clearly() -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
 
     with pytest.raises(
         ValueError,
         match="Port 5 canonical state cannot be compiled to JTCom backend",
     ):
-        driver._apply_vlan_membership_plan(
+        switch._apply_vlan_membership_plan(
             MagicMock(),
             VlanMembershipPlan(
                 current_per_port={5: make_port_state(untagged_vlan=10)},
@@ -279,7 +281,7 @@ def test_apply_boundary_rejects_empty_canonical_state_clearly() -> None:
 
 
 def test_apply_boundary_does_not_mutate_canonical_plan_state() -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
     desired_state = make_port_state(untagged_vlan=1, tagged_vlans={61})
     plan = VlanMembershipPlan(
@@ -291,7 +293,7 @@ def test_apply_boundary_does_not_mutate_canonical_plan_state() -> None:
     )
     before = make_port_state(untagged_vlan=1, tagged_vlans={61})
 
-    driver._apply_vlan_membership_plan(session, plan)
+    switch._apply_vlan_membership_plan(session, plan)
 
     assert plan.desired_per_port[1] == before
     assert desired_state == before
@@ -324,18 +326,18 @@ def test_real_world_trunk_playbook_scenario_stays_canonical_until_apply() -> Non
 def test_fetch_vlan_state_materializes_canonical_membership_from_jtcom_readback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
 
     monkeypatch.setattr(
-        "napalm_jtcom.driver.parse_static_vlans",
+        "cgiswitch.switch.parse_static_vlans",
         lambda _html: [
             VlanEntry(vlan_id=1, name="default"),
             VlanEntry(vlan_id=61, name="admin"),
         ],
     )
     monkeypatch.setattr(
-        "napalm_jtcom.driver.parse_port_vlan_settings",
+        "cgiswitch.switch.parse_port_vlan_settings",
         lambda _html: [
             VlanPortConfig(
                 port_name="Port 1",
@@ -347,7 +349,7 @@ def test_fetch_vlan_state_materializes_canonical_membership_from_jtcom_readback(
     )
     session.get.side_effect = ["static_html", "port_html"]
 
-    vlan_map = driver._fetch_vlan_state(session)
+    vlan_map = switch._fetch_vlan_state(session)
 
     assert vlan_map[1].untagged_ports == ["Port 1"]
     assert vlan_map[1].tagged_ports == []
@@ -411,12 +413,12 @@ def test_apply_mode_maps_desired_mode_none_to_vlan1() -> None:
     assert plan.warnings[0]["type"] == "mode_none_mapped_to_vlan1"
 
 
-def test_set_vlans_mode_none_maps_to_vlan1_before_apply(
+def test_apply_mode_none_maps_to_vlan1_before_apply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
-    driver._session = session
+    switch._session = session
     current_vlans = {
         20: VlanEntry(vlan_id=20, name="v20", untagged_ports=["Port 4"]),
     }
@@ -424,17 +426,20 @@ def test_set_vlans_mode_none_maps_to_vlan1_before_apply(
         PortSettings(port_id=4, name="Port 4", admin_up=True),
     ]
     monkeypatch.setattr(
-        driver,
+        switch,
         "_read_current_state",
         lambda _session: (current_vlans, current_ports),
     )
 
-    result = driver.set_vlans(
-        {20: VlanConfig(vlan_id=20, untagged_remove=[4])},
-        dry_run=True,
+    result = switch.apply(
+        DeviceConfig(vlans={20: VlanConfig(vlan_id=20, untagged_remove=[4])}),
+        check_mode=True,
     )
 
-    assert result["after"][4] == {"untagged_vlan": 1, "tagged_vlans": []}
+    assert result["diff"]["vlan_membership"]["after"][4] == {
+        "untagged_vlan": 1,
+        "tagged_vlans": [],
+    }
     assert result["warnings"][0]["type"] == "mode_none_mapped_to_vlan1"
     session.download_config_backup.assert_not_called()
 
@@ -623,7 +628,7 @@ def test_mode_none_fallback_allows_trunk_to_access_transition_with_override() ->
 def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
     membership_plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
@@ -634,7 +639,7 @@ def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
     )
 
     monkeypatch.setattr(
-        driver,
+        switch,
         "_read_current_state",
         lambda _session: (
             {
@@ -645,13 +650,13 @@ def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
         ),
     )
 
-    driver._verify_vlan_membership(session, membership_plan)
+    switch._verify_vlan_membership(session, membership_plan)
 
 
 def test_verify_expected_state_remains_canonical_not_backend_shaped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
     membership_plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
@@ -662,7 +667,7 @@ def test_verify_expected_state_remains_canonical_not_backend_shaped(
     )
 
     monkeypatch.setattr(
-        driver,
+        switch,
         "_read_current_state",
         lambda _session: (
             {
@@ -674,7 +679,7 @@ def test_verify_expected_state_remains_canonical_not_backend_shaped(
     )
 
     captured: dict[str, PortMembershipMap] = {}
-    driver_module = __import__("napalm_jtcom.driver", fromlist=["diff_membership_maps"])
+    driver_module = __import__("cgiswitch.switch", fromlist=["diff_membership_maps"])
     original_diff = driver_module.diff_membership_maps
 
     def capture_diff(current: PortMembershipMap, desired: PortMembershipMap) -> dict[str, object]:
@@ -682,9 +687,9 @@ def test_verify_expected_state_remains_canonical_not_backend_shaped(
         captured["desired"] = desired
         return original_diff(current, desired)
 
-    monkeypatch.setattr("napalm_jtcom.driver.diff_membership_maps", capture_diff)
+    monkeypatch.setattr("cgiswitch.switch.diff_membership_maps", capture_diff)
 
-    driver._verify_vlan_membership(session, membership_plan)
+    switch._verify_vlan_membership(session, membership_plan)
 
     assert captured["desired"][1] == make_port_state(untagged_vlan=1, tagged_vlans={61})
     assert captured["desired"][1]["tagged_vlans"] == {61}
@@ -693,7 +698,7 @@ def test_verify_expected_state_remains_canonical_not_backend_shaped(
 def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    switch = JTComSwitch("192.0.2.1", "admin", "admin")
     session = MagicMock()
     membership_plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
@@ -704,7 +709,7 @@ def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
     )
 
     monkeypatch.setattr(
-        driver,
+        switch,
         "_read_current_state",
         lambda _session: (
             {
@@ -716,7 +721,7 @@ def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
     )
 
     with pytest.raises(JTComVerificationError) as exc_info:
-        driver._verify_vlan_membership(session, membership_plan)
+        switch._verify_vlan_membership(session, membership_plan)
 
     assert exc_info.value.remaining_diff == {
         "total_changes": 1,
@@ -750,31 +755,35 @@ def test_action_plugin_int_list_helper_preserves_missing_none_and_empty_list(
 
 
 @pytest.mark.parametrize(
-    ("path", "verify_tls_default"),
+    ("path", "verify_tls_default", "check_mode"),
     [
-        (pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"), True),
+        (pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"), True, False),
+        (pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"), True, True),
     ],
 )
-def test_action_plugin_passes_allow_vlan_delete_in_use_only_when_present(
+def test_action_plugin_passes_typed_options_and_policy(
     monkeypatch: pytest.MonkeyPatch,
     path: pathlib.Path,
     verify_tls_default: bool,
+    check_mode: bool,
 ) -> None:
     module = _load_action_plugin_module(path)
     captured: dict[str, object] = {}
 
-    class FakeDriver:
+    class FakeSwitch:
         def __init__(
             self,
             hostname: str,
             username: str,
             password: str,
-            optional_args: dict[str, object],
+            connection: JTComConnectionOptions,
+            policy: ApplyPolicy,
         ) -> None:
             captured["hostname"] = hostname
             captured["username"] = username
             captured["password"] = password
-            captured["optional_args"] = dict(optional_args)
+            captured["connection"] = connection
+            captured["policy"] = policy
 
         def open(self) -> None:
             pass
@@ -782,12 +791,13 @@ def test_action_plugin_passes_allow_vlan_delete_in_use_only_when_present(
         def close(self) -> None:
             pass
 
-        def apply_device_config(
+        def apply(
             self,
-            _desired: object,
+            desired: object,
             *,
             check_mode: bool,
         ) -> dict[str, object]:
+            captured["desired"] = desired
             captured["check_mode"] = check_mode
             return {
                 "changed": False,
@@ -799,7 +809,7 @@ def test_action_plugin_passes_allow_vlan_delete_in_use_only_when_present(
                 "changed_vlans": [],
             }
 
-    monkeypatch.setattr("napalm_jtcom.driver.JTComDriver", FakeDriver)
+    monkeypatch.setattr("cgiswitch.switch.JTComSwitch", FakeSwitch)
 
     action = module.ActionModule()
     action._task = types.SimpleNamespace(
@@ -810,19 +820,15 @@ def test_action_plugin_passes_allow_vlan_delete_in_use_only_when_present(
             "allow_vlan_delete_in_use": True,
         }
     )
-    action._play_context = types.SimpleNamespace(check_mode=False)
+    action._play_context = types.SimpleNamespace(check_mode=check_mode)
 
     result = action.run()
 
     assert result["changed"] is False
-    assert captured["optional_args"] == {
-        "verify_tls": verify_tls_default,
-        "backup_before_change": True,
-        "safety_port_id": 6,
-        "allow_port_mode_change": False,
-        "allow_untagged_move": False,
-        "allow_vlan_delete_in_use": True,
-    }
+    assert captured["desired"] == DeviceConfig(vlans={}, ports={})
+    assert captured["check_mode"] is check_mode
+    assert captured["connection"] == JTComConnectionOptions(verify_tls=verify_tls_default)
+    assert captured["policy"] == ApplyPolicy(allow_vlan_delete_in_use=True)
 
 
 @pytest.mark.parametrize(
@@ -831,7 +837,7 @@ def test_action_plugin_passes_allow_vlan_delete_in_use_only_when_present(
         (pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"), True),
     ],
 )
-def test_action_plugin_does_not_inject_allow_vlan_delete_in_use_when_absent(
+def test_action_plugin_defaults_to_blocking_vlan_delete_in_use(
     monkeypatch: pytest.MonkeyPatch,
     path: pathlib.Path,
     verify_tls_default: bool,
@@ -839,18 +845,20 @@ def test_action_plugin_does_not_inject_allow_vlan_delete_in_use_when_absent(
     module = _load_action_plugin_module(path)
     captured: dict[str, object] = {}
 
-    class FakeDriver:
+    class FakeSwitch:
         def __init__(
             self,
             hostname: str,
             username: str,
             password: str,
-            optional_args: dict[str, object],
+            connection: JTComConnectionOptions,
+            policy: ApplyPolicy,
         ) -> None:
             captured["hostname"] = hostname
             captured["username"] = username
             captured["password"] = password
-            captured["optional_args"] = dict(optional_args)
+            captured["connection"] = connection
+            captured["policy"] = policy
 
         def open(self) -> None:
             pass
@@ -858,12 +866,13 @@ def test_action_plugin_does_not_inject_allow_vlan_delete_in_use_when_absent(
         def close(self) -> None:
             pass
 
-        def apply_device_config(
+        def apply(
             self,
-            _desired: object,
+            desired: object,
             *,
             check_mode: bool,
         ) -> dict[str, object]:
+            captured["desired"] = desired
             captured["check_mode"] = check_mode
             return {
                 "changed": False,
@@ -875,7 +884,7 @@ def test_action_plugin_does_not_inject_allow_vlan_delete_in_use_when_absent(
                 "changed_vlans": [],
             }
 
-    monkeypatch.setattr("napalm_jtcom.driver.JTComDriver", FakeDriver)
+    monkeypatch.setattr("cgiswitch.switch.JTComSwitch", FakeSwitch)
 
     action = module.ActionModule()
     action._task = types.SimpleNamespace(
@@ -889,13 +898,10 @@ def test_action_plugin_does_not_inject_allow_vlan_delete_in_use_when_absent(
 
     action.run()
 
-    assert captured["optional_args"] == {
-        "verify_tls": verify_tls_default,
-        "backup_before_change": True,
-        "safety_port_id": 6,
-        "allow_port_mode_change": False,
-        "allow_untagged_move": False,
-    }
+    assert captured["connection"] == JTComConnectionOptions(verify_tls=verify_tls_default)
+    assert captured["policy"] == ApplyPolicy()
+    assert captured["desired"] == DeviceConfig(vlans={}, ports={})
+    assert captured["check_mode"] is False
 
 
 def _load_action_plugin_module(path: pathlib.Path) -> types.ModuleType:
