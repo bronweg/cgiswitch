@@ -37,10 +37,6 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-After merging the revival stack, the maintainer must manually rename the
-GitHub repository from `napalm-jtcom` to `cgiswitch`. The URLs above target that
-future name; until the rename, use the existing checkout or repository URL.
-
 ---
 
 ## Key Features
@@ -112,6 +108,17 @@ list are affected. Unlisted items are always left untouched.
   - `trunk_add_vlans`
   - `trunk_remove_vlans`
   - `trunk_set_vlans`
+
+### Current-State Validation
+
+Before planning, the core rejects desired port IDs that are absent from the
+observed device inventory, including VLAN membership references. Missing or
+malformed VLAN data and inconsistent cross-page references stop the operation.
+
+Before backup or any write, all required port payload fields must be known
+from current state or explicitly supplied in the desired configuration. Unknown
+administrative state and flow control are never replaced with guessed defaults.
+These preflight checks also run in check mode.
 
 ### VLAN Membership Policy
 

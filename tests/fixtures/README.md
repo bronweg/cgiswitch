@@ -22,3 +22,9 @@ tests can run without a physical device.
 3. Use browser "Save page as" → **Webpage, HTML only**.
 4. Place the saved file in this directory.
 5. Sanitise any credentials or sensitive IP addresses before committing.
+
+## Malformed VLAN fixtures
+
+The `malformed_vlan_*.html` files are synthetic invalid responses for VLAN ID,
+access VLAN, native VLAN, permit list, and mode parsing regression tests. They
+must be rejected rather than converted to missing or empty configuration.

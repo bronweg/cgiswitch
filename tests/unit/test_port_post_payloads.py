@@ -204,3 +204,31 @@ class TestApplyPortChanges:
         change_set = PortChangeSet(update=[PortConfig(port_id=1, admin_up=False)])
         with pytest.raises(JTComSwitchError):
             apply_port_changes(session, current, change_set)
+
+
+@pytest.mark.parametrize("field", ["admin_up", "flow_control", "speed_duplex"])
+def test_unknown_preserved_fields_never_become_defaults(field: str) -> None:
+    current = make_settings(3)
+    setattr(current, field, None)
+    desired = PortConfig(3, speed_duplex="100M/Full")
+    if field == "speed_duplex":
+        desired = PortConfig(3, admin_up=False)
+    with pytest.raises(ValueError, match=field):
+        _build_port_payload(desired, current)
+
+
+def test_explicit_flow_resolves_unknown_without_changing_other_fields() -> None:
+    current = PortSettings(3, "Port 3", False, "1000M/Full", None)
+    assert _build_port_payload(PortConfig(3, flow_control=True), current) == {
+        "portid": "2", "state": "0", "speed_duplex": "5", "flow": "1",
+    }
+
+
+def test_entire_port_batch_is_compiled_before_any_post() -> None:
+    session = MagicMock()
+    current = [make_settings(1), PortSettings(2, "Port 2", True, "Auto", None)]
+    changes = PortChangeSet(update=[PortConfig(1, admin_up=False),
+                                    PortConfig(2, speed_duplex="100M/Full")])
+    with pytest.raises(ValueError, match="flow_control"):
+        apply_port_changes(session, current, changes)
+    session.post.assert_not_called()

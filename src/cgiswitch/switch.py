@@ -7,8 +7,8 @@ import logging
 import pathlib
 from typing import Any
 
-from cgiswitch.client.errors import JTComError, JTComVerificationError
-from cgiswitch.client.port_ops import apply_port_changes
+from cgiswitch.client.errors import JTComError, JTComStateError, JTComVerificationError
+from cgiswitch.client.port_ops import apply_port_changes, compile_port_changes
 from cgiswitch.client.session import JTComCredentials, JTComSession
 from cgiswitch.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
 from cgiswitch.model.config import DeviceConfig
@@ -23,6 +23,7 @@ from cgiswitch.utils.device_diff import build_device_plan
 from cgiswitch.utils.normalize import normalize_device_config
 from cgiswitch.utils.port_vlan_input import merge_port_vlan_membership_inputs
 from cgiswitch.utils.render import render_diff
+from cgiswitch.utils.validation import validate_desired_ports
 from cgiswitch.utils.vlan_membership import (
     PortMembershipMap,
     VlanMembershipPlan,
@@ -204,6 +205,7 @@ class JTComSwitch:
 
         # --- Read and normalize current state ---
         current_vlans, current_ports = self._read_current_state(session)
+        validate_desired_ports(desired, current_ports)
         current_cfg = DeviceConfig.from_current(current_vlans, current_ports)
         current_n = normalize_device_config(current_cfg)
         desired_n = normalize_device_config(desired)
@@ -244,6 +246,13 @@ class JTComSwitch:
                 "before": serialize_membership_map(membership_plan.current_per_port),
                 "after": serialize_membership_map(membership_plan.desired_per_port),
             }
+
+        # Validate every full port payload before backup, VLAN writes, or check-mode return.
+        port_changes = PortChangeSet(update=[
+            desired_n.ports[change.details["port_id"]]
+            for change in plan.changes if change.kind == "port_update"
+        ])
+        compile_port_changes(current_ports, port_changes)
 
         if not plan.changes and not membership_plan.changed_ports:
             return {
@@ -449,30 +458,46 @@ class JTComSwitch:
         port_configs = parse_port_vlan_settings(port_html)
 
         vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
+        for config in port_configs:
+            references = [
+                ("access_vlan", config.access_vlan),
+                ("native_vlan", config.native_vlan),
+                *(("permit_vlans", vid) for vid in config.permit_vlans),
+            ]
+            for field, vlan_id in references:
+                if vlan_id is not None and vlan_id not in vlan_map:
+                    raise JTComStateError(
+                        f"VLAN readback: port={config.port_name!r} field={field} "
+                        f"raw={vlan_id!r} references an unknown VLAN; "
+                        f"known VLANs: {sorted(vlan_map)}"
+                    )
+            if config.vlan_type.lower() == "trunk" and (
+                config.native_vlan not in config.permit_vlans
+            ):
+                raise JTComStateError(
+                    f"VLAN readback: port={config.port_name!r} field=permit_vlans "
+                    f"raw={config.permit_vlans!r} omits native VLAN {config.native_vlan!r}"
+                )
         known_ports = [port_name_to_id(pc.port_name) for pc in port_configs]
-        current_per_port = build_current_per_port_from_jtcom_readback(
-            port_configs,
-            known_ports,
-        )
+        try:
+            current_per_port = build_current_per_port_from_jtcom_readback(
+                port_configs, known_ports,
+            )
+        except ValueError as exc:
+            raise JTComStateError(f"Inconsistent VLAN readback: {exc}") from exc
         port_name_by_id = {
             port_name_to_id(pc.port_name): pc.port_name
             for pc in port_configs
         }
         for port_id, state in current_per_port.items():
-            port_name = port_name_by_id.get(port_id)
-            if port_name is None:
-                continue
+            port_name = port_name_by_id[port_id]
             untagged_vlan = state["untagged_vlan"]
             if isinstance(untagged_vlan, int):
-                entry = vlan_map.get(untagged_vlan)
-                if entry is not None:
-                    entry.untagged_ports.append(port_name)
+                vlan_map[untagged_vlan].untagged_ports.append(port_name)
             tagged_vlans = state["tagged_vlans"]
             if isinstance(tagged_vlans, set):
                 for vid in sorted(tagged_vlans):
-                    entry = vlan_map.get(vid)
-                    if entry is not None:
-                        entry.tagged_ports.append(port_name)
+                    vlan_map[vid].tagged_ports.append(port_name)
         return vlan_map
 
     def _read_current_state(
@@ -492,6 +517,18 @@ class JTComSwitch:
 
         port_html2 = session.get(PORT_SETTINGS)
         settings_list, _ = parse_port_page(port_html2)
+        setting_ids = {settings.port_id for settings in settings_list}
+        membership_ids = {
+            port_name_to_id(name)
+            for vlan in vlan_map.values()
+            for name in vlan.tagged_ports + vlan.untagged_ports
+        }
+        if setting_ids != membership_ids:
+            raise JTComStateError(
+                "Inconsistent port inventory across port settings and VLAN pages: "
+                f"missing VLAN rows for ports {sorted(setting_ids - membership_ids)}; "
+                f"unknown VLAN-page ports {sorted(membership_ids - setting_ids)}"
+            )
         return vlan_map, settings_list
 
     def _save_backup(

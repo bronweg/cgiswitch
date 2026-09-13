@@ -28,7 +28,7 @@ git config core.hooksPath .githooks
 
 Repository content and commit messages must be in English. Check staged
 content with `python3 tools/check_language.py --staged`; CI also scans tracked
-content. The repository URL above targets the pending maintainer rename.
+content.
 
 ## Running Tests
 

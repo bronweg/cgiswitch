@@ -49,17 +49,30 @@ def parse_port_page(
     settings_list: list[PortSettings] = []
     oper_list: list[PortOperStatus] = []
 
+    seen_ids: set[int] = set()
     for row in table.find_all("tr"):
         cells = row.find_all("td")
-        if len(cells) < 6:
+        if not cells:
             continue  # header rows or spacer rows
+        if len(cells) < 6:
+            raise JTComParseError(
+                f"parse_port_page field='row' raw={row.get_text()!r}: incomplete port row"
+            )
         port_text = cells[0].get_text(strip=True)
-        m = _PORT_NAME_RE.match(port_text)
-        if not m:
-            continue  # not a port data row
+        m = _PORT_NAME_RE.fullmatch(port_text)
+        if not m or int(m.group(1)) < 1:
+            raise JTComParseError(
+                f"parse_port_page field='port_id' raw={port_text!r}: expected positive Port N"
+            )
         port_id = int(m.group(1))
+        if port_id in seen_ids:
+            raise JTComParseError(
+                f"parse_port_page field='port_id' raw={port_text!r}: duplicate port {port_id}"
+            )
+        seen_ids.add(port_id)
 
-        admin_up = cells[1].get_text(strip=True).lower() == "enable"
+        admin_text = cells[1].get_text(strip=True).lower()
+        admin_up = admin_text == "enable" if admin_text in ("enable", "disable") else None
         speed_config = cells[2].get_text(strip=True) or None
         speed_actual = cells[3].get_text(strip=True)
         flow_text = cells[4].get_text(strip=True).lower()

@@ -256,3 +256,37 @@ def test_parse_actual_2500m_full() -> None:
 
 def test_parse_actual_unknown_text() -> None:
     assert _parse_actual_speed("Negotiating...") == (None, None, None)
+
+
+@pytest.mark.parametrize("admin", ["Unknown", "", "--", "disabled-ish"])
+def test_unknown_current_admin_status_is_preserved(admin: str) -> None:
+    settings, _ = parse_port_page(_make_html(("Port 1", admin, "Auto", "Link Down", "On", "Off")))
+    assert settings[0].admin_up is None
+
+
+@pytest.mark.parametrize("field", ["flow_control", "speed_duplex"])
+def test_missing_current_port_fields_are_preserved(field: str) -> None:
+    speed, flow = ("", "On") if field == "speed_duplex" else ("Auto", "Unknown")
+    settings, _ = parse_port_page(_make_html(("Port 1", "Enable", speed, "Link Down", flow, "Off")))
+    assert getattr(settings[0], field) is None
+
+
+@pytest.mark.parametrize("port", ["Port 0", "Port 2 junk", "unknown port"])
+def test_malformed_port_row_is_not_skipped(port: str) -> None:
+    html = _make_html(("Port 1", "Enable", "Auto", "Link Down", "On", "Off"),
+                      (port, "Enable", "Auto", "Link Down", "On", "Off"))
+    with pytest.raises(JTComParseError, match="port_id"):
+        parse_port_page(html)
+
+
+def test_duplicate_current_port_is_rejected() -> None:
+    row = ("Port 1", "Enable", "Auto", "Link Down", "On", "Off")
+    with pytest.raises(JTComParseError, match="duplicate"):
+        parse_port_page(_make_html(row, row))
+
+
+def test_incomplete_port_row_is_not_skipped() -> None:
+    html = _make_html(("Port 1", "Enable", "Auto", "Link Down", "On", "Off"))
+    html = html.replace('</tbody>', '<tr><td>Port 2</td></tr></tbody>')
+    with pytest.raises(JTComParseError, match="incomplete"):
+        parse_port_page(html)

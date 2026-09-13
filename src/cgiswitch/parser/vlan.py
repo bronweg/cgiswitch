@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
-import contextlib
 import re
 
 from cgiswitch.client.errors import JTComParseError
 from cgiswitch.model.vlan import VlanEntry, VlanPortConfig
 from cgiswitch.parser.html import normalize_text, parse_html
+
+
+def _parse_vlan_id(raw: str, *, field: str, context: str) -> int:
+    """Parse a VLAN ID and report malformed switch data consistently."""
+    if not re.fullmatch(r"[0-9]+", raw):
+        raise JTComParseError(
+            f"{context} field={field!r} raw={raw!r}: "
+            "expected an integer VLAN ID"
+        )
+    vlan_id = int(raw)
+    if not 1 <= vlan_id <= 4094:
+        raise JTComParseError(
+            f"{context} field={field!r} raw={raw!r}: "
+            "VLAN ID must be in range 1-4094"
+        )
+    return vlan_id
 
 
 def parse_static_vlans(html: str) -> list[VlanEntry]:
@@ -29,7 +44,7 @@ def parse_static_vlans(html: str) -> list[VlanEntry]:
         derived from the port-based VLAN page).
 
     Raises:
-        JTComParseError: If the VLAN list table cannot be found.
+        JTComParseError: If the VLAN list is missing, malformed, or ambiguous.
     """
     soup = parse_html(html)
     form = soup.find("form", id="vlanDel")
@@ -41,18 +56,39 @@ def parse_static_vlans(html: str) -> list[VlanEntry]:
         raise JTComParseError("Could not find VLAN table inside vlanDel form")
 
     entries: list[VlanEntry] = []
-    for tr in table.find_all("tr"):
+    seen_ids: set[int] = set()
+    for row_number, tr in enumerate(table.find_all("tr"), start=1):
         tds = tr.find_all("td")
-        if len(tds) < 4:
-            continue  # skip header rows (only <th>) or incomplete rows
+        if len(tds) != 4:
+            if not tds and tr.find_all("th"):
+                continue  # genuine header row
+            if not tds:
+                continue  # whitespace-only structural row
+            raise JTComParseError(
+                f"parse_static_vlans field='row' raw={tr.get_text()!r} "
+                f"context=VLAN row {row_number}: unexpected data row column count"
+            )
         vlan_id_text = normalize_text(tds[2].get_text())
         vlan_name_text = normalize_text(tds[3].get_text())
-        try:
-            vlan_id = int(vlan_id_text)
-        except ValueError:
-            continue  # skip non-numeric rows
+        if vlan_id_text.lower() == "vlan id" and vlan_name_text.lower() == "vlan name":
+            continue  # a legacy table may use <td> for its header
+        vlan_id = _parse_vlan_id(
+            vlan_id_text,
+            field="vlan_id",
+            context=f"parse_static_vlans VLAN row {row_number}",
+        )
+        if vlan_id in seen_ids:
+            raise JTComParseError(
+                f"parse_static_vlans field='vlan_id' raw={vlan_id_text!r} "
+                f"context=VLAN row {row_number}: duplicate VLAN ID {vlan_id}"
+            )
+        seen_ids.add(vlan_id)
         entries.append(VlanEntry(vlan_id=vlan_id, name=vlan_name_text))
 
+    if not entries:
+        raise JTComParseError(
+            "parse_static_vlans field='rows' raw=[]: no VLAN entries found"
+        )
     return entries
 
 
@@ -77,7 +113,7 @@ def parse_port_vlan_settings(html: str) -> list[VlanPortConfig]:
         List of :class:`~cgiswitch.model.vlan.VlanPortConfig` objects.
 
     Raises:
-        JTComParseError: If the port VLAN status table cannot be found.
+        JTComParseError: If the port VLAN table is missing, malformed, or ambiguous.
     """
     soup = parse_html(html)
 
@@ -102,41 +138,97 @@ def parse_port_vlan_settings(html: str) -> list[VlanPortConfig]:
         )
 
     configs: list[VlanPortConfig] = []
-    first_row = True
-    for tr in status_table.find_all("tr"):
+    seen_ports: set[int] = set()
+    for row_number, tr in enumerate(status_table.find_all("tr"), start=1):
         tds = tr.find_all("td")
-        if len(tds) < 5:
-            continue
+        if len(tds) != 5:
+            if not tds and tr.find_all("th"):
+                continue
+            if not tds:
+                continue
+            raise JTComParseError(
+                f"parse_port_vlan_settings field='row' raw={tr.get_text()!r} "
+                f"context=port row {row_number}: unexpected data row column count"
+            )
         port_name = normalize_text(tds[0].get_text())
         vlan_type = normalize_text(tds[1].get_text())
 
-        # Skip header row if it uses <td> instead of <th>
-        if first_row and port_name.lower() == "port":
-            first_row = False
+        if port_name.lower() == "port" and vlan_type.lower() == "vlan type":
             continue
-        first_row = False
-
         access_vlan_text = normalize_text(tds[2].get_text())
         native_vlan_text = normalize_text(tds[3].get_text())
         permit_vlan_text = normalize_text(tds[4].get_text())
 
-        access_vlan: int | None = None
-        if access_vlan_text not in ("--", ""):
-            with contextlib.suppress(ValueError):
-                access_vlan = int(access_vlan_text)
+        context = f"parse_port_vlan_settings port={port_name!r} row {row_number}"
+        port_match = re.fullmatch(r"Port\s*([1-9][0-9]*)", port_name, re.IGNORECASE)
+        if port_match is None:
+            raise JTComParseError(
+                f"parse_port_vlan_settings field='port_name' raw={port_name!r} "
+                f"context=port row {row_number}: expected a positive Port N identifier"
+            )
+        if vlan_type.lower() not in ("access", "trunk"):
+            raise JTComParseError(
+                f"parse_port_vlan_settings field='vlan_type' raw={vlan_type!r} "
+                f"context={context}: expected Access or Trunk"
+            )
+        port_id = int(port_match.group(1))
+        if port_id in seen_ports:
+            raise JTComParseError(
+                f"parse_port_vlan_settings field='port_name' raw={port_name!r} "
+                f"context={context}: duplicate port row"
+            )
+        seen_ports.add(port_id)
+        port_name = f"Port {port_id}"
 
-        native_vlan: int | None = None
-        if native_vlan_text not in ("--", ""):
-            with contextlib.suppress(ValueError):
-                native_vlan = int(native_vlan_text)
+        if vlan_type.lower() == "access":
+            if access_vlan_text == "--":
+                raise JTComParseError(
+                    f"parse_port_vlan_settings field='access_vlan' raw={access_vlan_text!r} "
+                    f"context={context}: required for Access mode"
+                )
+            access_vlan = _parse_vlan_id(
+                access_vlan_text, field="access_vlan", context=context
+            )
+            if native_vlan_text != "--" or permit_vlan_text != "--":
+                raise JTComParseError(
+                    f"parse_port_vlan_settings field='inactive_vlan' "
+                    f"raw={(native_vlan_text, permit_vlan_text)!r} context={context}: "
+                    "Access mode requires inactive fields to be '--'"
+                )
+            native_vlan = None
+        else:
+            if native_vlan_text == "--":
+                raise JTComParseError(
+                    f"parse_port_vlan_settings field='native_vlan' raw={native_vlan_text!r} "
+                    f"context={context}: required for Trunk mode"
+                )
+            native_vlan = _parse_vlan_id(
+                native_vlan_text, field="native_vlan", context=context
+            )
+            if access_vlan_text != "--":
+                raise JTComParseError(
+                    f"parse_port_vlan_settings field='access_vlan' raw={access_vlan_text!r} "
+                    f"context={context}: inactive for Trunk mode"
+                )
+            access_vlan = None
 
         permit_vlans: list[int] = []
-        if permit_vlan_text not in ("--", ""):
-            for token in re.split(r"[,_]+", permit_vlan_text):
+        if permit_vlan_text != "--":
+            for token in re.split(r"[,_]", permit_vlan_text):
                 token = token.strip()
-                if token:
-                    with contextlib.suppress(ValueError):
-                        permit_vlans.append(int(token))
+                if not token:
+                    raise JTComParseError(
+                        f"parse_port_vlan_settings field='permit_vlans' "
+                        f"raw={permit_vlan_text!r} context={context}: empty token"
+                    )
+                try:
+                    permit_vlans.append(
+                        _parse_vlan_id(token, field="permit_vlans", context=context)
+                    )
+                except JTComParseError as exc:
+                    raise JTComParseError(
+                        f"{context} field='permit_vlans' raw={permit_vlan_text!r}: {exc}"
+                    ) from exc
 
         configs.append(
             VlanPortConfig(
@@ -148,6 +240,10 @@ def parse_port_vlan_settings(html: str) -> list[VlanPortConfig]:
             )
         )
 
+    if not configs:
+        raise JTComParseError(
+            "parse_port_vlan_settings field='rows' raw=[]: no port VLAN entries found"
+        )
     return configs
 
 
