@@ -1,464 +1,257 @@
 # cgiswitch
 
-cgiswitch Python core for **JTCom CGI-based Ethernet switches**.
+`cgiswitch` is a typed Python client and Ansible collection for JTCom L2
+Ethernet switches that expose an HTTP CGI web interface. The project is Alpha
+software; fixture-backed tests are available, while validation on real
+hardware is still pending.
 
-Provides a typed Python API for managing L2 managed switches
-that expose a CGI-based web interface (no SSH/NETCONF/SNMP API).
-
----
-
-## Overview
-
-`cgiswitch` speaks HTTP to the switch's built-in web UI, parses HTML responses
-with BeautifulSoup, and exposes a canonical switch API. This makes it
-possible to manage JTCom (and compatible) switches from Ansible and Python scripts.
-
-This project is Alpha software. Hardware validation of this refactoring is
-pending. The apply path does not perform automatic rollback after a failed
-write. Test changes in check mode and retain device backups according to your
-operating procedures.
-
----
-
-## Supported Devices
-
-| Vendor | Series | Validation |
-|--------|--------|--------|
-| JTCom  | L2 CGI | Fixture-backed; hardware validation pending |
-
----
+The apply path takes a backup before changes by default, verifies the result by
+reading the switch again, and does not attempt automatic rollback. It does not
+provide a transactional commit or a general configuration restore workflow.
+The implementation targets the observed JTCom CGI endpoints and makes no
+generic compatibility guarantee for other firmware.
 
 ## Installation
+
+The package version in this checkout is `0.1.0` and requires Python 3.11 or
+newer. To use the core from a source checkout:
 
 ```bash
 git clone https://github.com/bronweg/cgiswitch.git
 cd cgiswitch
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
----
+The Ansible collection is in `galaxy/bronweg/cgiswitch`. Install
+`ansible-core` first so that `ansible-galaxy` is available, then build and
+install the collection from the checkout:
 
-## Key Features
+```bash
+python -m pip install 'ansible-core>=2.14'
+ansible-galaxy collection build --force galaxy/bronweg/cgiswitch
+ansible-galaxy collection install bronweg-cgiswitch-0.1.0.tar.gz
+```
 
-| Capability | Detail |
-|---|---|
-| Read device facts | `read_device_info()` |
-| Read interfaces | `read_ports()` |
-| Read VLANs | `read_vlans()` |
-| Incremental VLAN changes | `apply(desired, check_mode=False)` |
-| VLAN-centric membership ops | `tagged_add/remove/set`, `untagged_add/remove/set` |
-| Port-centric membership ops | `access_vlan`, `native_vlan`, `trunk_add_vlans`, `trunk_remove_vlans`, `trunk_set_vlans` |
-| Incremental port patching | `apply(DeviceConfig(ports=...))` |
-| Full device config apply | `apply(desired, check_mode=False)` |
-| Ansible Galaxy collection | `bronweg.cgiswitch.jtcom_config` |
+The collection declares `requires_ansible: ">=2.14.0"`. The action plugin runs
+the core in the Ansible controller's Python environment, so this checkout's
+`cgiswitch` package must be installed there as well. The supported Ansible interface is
+`bronweg.cgiswitch.jtcom_config`.
 
-### Port Numbering
+## Connection scheme and TLS
 
-Ports are 1-based everywhere in this project:
+For an Ansible `host` without a scheme, `verify_tls: true` (the default)
+selects HTTPS/443, while `verify_tls: false` selects HTTP/80. Explicit
+`http://` or `https://` in `host` sets the scheme directly. On HTTPS,
+`verify_tls` controls certificate verification: an explicit HTTPS URL with
+`verify_tls: false` still uses HTTPS, with verification disabled.
 
-- switch `Port 5`
-- `PortConfig(port_id=5)`
-- `VlanConfig(... tagged_add=[5])`
-- `changed_ports: [5]`
+The Python API has the same behavior through `hostname` and
+`JTComConnectionOptions.verify_tls`; `connection.port` can override the
+default port for a hostname without a scheme.
 
-all refer to the same physical port.
+## What is supported
 
-### Canonical Model vs JTCom Backend
+The core provides these read operations:
 
-User input, planning, policy checks, diffs, and verification all use the same
-canonical on-wire VLAN membership model:
+- `read_device_info()`
+- `read_ports()`
+- `read_vlans()`
 
-- `untagged_vlan`: the single VLAN sent untagged on wire
-- `tagged_vlans`: VLANs sent tagged on wire
+`apply(DeviceConfig(...))` provides idempotent, incremental writes for VLAN
+creation, renaming, membership updates, VLAN deletion, port administrative
+state, speed/duplex, flow control, and port-centric access/trunk membership. The same operations are
+available through the Ansible module. Port IDs are 1-based throughout the
+project and VLAN IDs must be in `1..4094`.
 
-JTCom itself uses a backend-specific model:
+Desired VLAN entries use `state: "present"` (the default) or `state: "absent"`.
+Port entries are patches: omit a port field to leave that setting unchanged.
+VLAN membership can be expressed either by VLAN (`tagged_add`,
+`tagged_remove`, `tagged_set`, `untagged_add`, `untagged_remove`,
+`untagged_set`) or by port (`access_vlan`, `native_vlan`,
+`trunk_add_vlans`, `trunk_remove_vlans`, `trunk_set_vlans`).
 
-- access mode: `access_vlan`
-- trunk mode: `native_vlan` + `permit_vlans`
-- on JTCom, `permit_vlans` includes `native_vlan`
+`access_vlan` sets the untagged VLAN and clears all tagged memberships.
+It cannot be combined with `native_vlan` or any `trunk_*` field.
+Set fields replace membership; add/remove fields patch it. The supported
+`tagged_ports` and `untagged_ports` fields are replacement aliases.
 
-You normally do not need to think in backend terms. The core compiles every
-planned write into JTCom backend state before taking a backup or performing any
-write, then normalizes JTCom readback back into canonical state before
-verification.
+Both forms are converted to the canonical on-wire model:
 
-### Incremental Change Model
+- `untagged_vlan`: the one VLAN sent untagged on a port
+- `tagged_vlans`: VLANs sent tagged on a port
 
-All write operations use an **incremental / patch model**: only the VLANs and ports you
-list are affected. Unlisted items are always left untouched.
+The JTCom backend represents access mode as `access_vlan` and trunk mode as a
+`native_vlan` plus permitted VLANs. The core translates at the write boundary
+and normalizes readback before verification.
 
-- VLANs carry a `state` field: `present` (default) or `absent`.
-- Port entries are patch-only — supply only the fields you want to change.
-- Port numbering is 1-based across the entire project: switch `Port 5`,
-  `PortConfig(port_id=5)`, and VLAN membership port `5` all refer to the same port.
-- VLAN 1 is protected and can never be deleted.
-- The configured safety port (port 6 by default) cannot be administratively disabled.
-  Its requested shutdown remains visible in the plan and diff, but policy blocks apply.
-- VLAN membership accepts both VLAN-centric and port-centric input. Both are
-  translated into the same canonical membership engine before planning.
+The operation is incremental, but an explicit request can have related
+effects. Deleting an in-use VLAN with `allow_vlan_delete_in_use=True` first
+detaches its affected ports. A membership request can update the other side of
+the same relationship, and the no-membership fallback maps an affected port to
+access VLAN 1 with a warning. Consequently, an item omitted from the request
+can appear in the effective plan when it must be changed to satisfy the
+requested membership or deletion.
 
-### Supported Configuration Styles
+## Safety and validation
 
-- VLAN-centric:
-  - `tagged_add`, `tagged_remove`, `tagged_set`
-  - `untagged_add`, `untagged_remove`, `untagged_set`
-- Port-centric:
-  - `access_vlan`: select access mode, set the untagged VLAN, and clear all tagged memberships.
-  It cannot be combined with `native_vlan` or any `trunk_*` field. A trunk-to-access
-  transition requires `allow_port_mode_change=True`.
-  - `native_vlan`
-  - `trunk_add_vlans`
-  - `trunk_remove_vlans`
-  - `trunk_set_vlans`
+The default `ApplyPolicy` blocks access/trunk mode changes, untagged/native
+VLAN moves, and deletion of an in-use VLAN. These can be enabled explicitly
+with `allow_port_mode_change`, `allow_untagged_move`, and
+`allow_vlan_delete_in_use`. Unknown VLANs referenced by port-centric input
+fail validation by default; `auto_create_referenced_vlans=True` can create
+access/native/add/set references. Removal references never auto-create VLANs.
+A reference explicitly declared `state="absent"` is always a conflict.
+VLAN 1 cannot be deleted.
 
-### Current-State Validation
+The safety port defaults to port 6 and cannot be administratively disabled.
+Set `ApplyPolicy(safety_port_id=...)` in Python or `safety_port_id` in the
+collection when the protected management port is different. This setting does
+not silently substitute another port when the configured port is unknown.
 
-Before planning, the core rejects desired port IDs that are absent from the
-observed device inventory, including VLAN membership references. Missing or
-malformed VLAN data and inconsistent cross-page references stop the operation.
+Check mode performs the same state reads, normalization, validation, planning,
+and policy checks as a real apply. It returns the planned diff, ordered
+operations, advisory `warnings`, and blocking `violations` without taking a
+backup or writing to the switch. A blocked check-mode plan can still report
+`changed: true` when the requested state differs from the current state.
 
-Before backup or any write, all required port payload fields must be known
-from current state or explicitly supplied in the desired configuration. Unknown
-administrative state and flow control are never replaced with guessed defaults.
-These preflight checks also run in check mode.
+Membership the backend cannot express, such as tagged-only membership without
+an untagged/native VLAN, is always blocked. If a changed port would otherwise
+have no membership, the planner maps it to access VLAN 1 and emits a structured
+warning; that effective fallback is included in policy checks and the diff.
 
-### Session Expiry and Backup Validation
+The collection action plugin validates top-level arguments and every nested
+VLAN and port field before opening a switch connection. This strict validation
+is owned by `galaxy/bronweg/cgiswitch/plugins/module_utils/ansible_input.py`;
+the module file supplies documentation while execution stays in the action
+plugin. Unknown keys, booleans used as integers, quoted numeric values,
+malformed maps, and invalid ranges are rejected. Integer or ASCII decimal map
+keys are accepted and normalized; duplicate keys after normalization are
+rejected.
 
-GET, POST, and backup downloads share the same bounded authentication retry.
-An explicit expiry response (CGI `code=11`, HTTP 401, or a recognized login
-response) triggers at most one login and one retry of the original request.
-Repeated expiry raises `JTComAuthError` and clears the authenticated state.
-Failed login is not retried. Network errors, HTTP 403/5xx from an operation,
-and non-auth CGI operation errors do not trigger replay.
+## Backups, errors, and verification
 
-Backup downloads must be non-empty and must not be recognizable HTML, login,
-or error responses. Accepted bytes are returned unchanged. No backup magic,
-signature, or minimum length is assumed without device evidence. These checks
-detect obvious invalid responses; they do not prove that a backup is restorable.
+Before a real change, the core compiles and validates all operations, then
+saves a non-empty, non-HTML backup when `backup_before_change=True`. A backup
+or write failure is reported without pretending that the device is unchanged.
+If a POST may have been attempted, `changed` is conservatively true.
 
-### Apply Orchestration and Failure Reporting
+Backup validation rejects empty and recognizable HTML/login/error responses.
+It assumes no undocumented signature and does not prove restorability.
 
-The apply path compiles and validates the complete operation list before a
-backup is taken. It presents operations in this deterministic order:
+Failures during backup, writes, or verification are represented by `JTComApplyError` in Python and by the
+structured result returned by the collection. The result includes the backup
+path, completed operations, failed operation, original exception, whether a
+write was attempted, and best-effort readback information. Verification
+failures retain the exact readback snapshot used to calculate `remaining_diff`;
+a recovery read is attempted only when no usable verification snapshot exists.
+There is no automatic rollback after a failed write.
 
-1. VLAN creates, sorted by ascending VLAN ID
-2. VLAN renames, sorted by ascending VLAN ID
-3. VLAN membership updates, sorted by ascending port ID
-4. Port settings updates, sorted by ascending port ID
-5. VLAN deletes, sorted by descending VLAN ID
+Invalid desired configuration raises `ValueError`; malformed device responses
+raise typed parse errors. A policy-blocked real apply raises `JTComPolicyError`
+before backup or writes; check mode returns the violations instead. Authentication expiry gets at
+most one login and retry of the original request; repeated expiry raises an
+authentication error. Network, authentication, malformed device state, and
+operation errors fail closed rather than being replaced with guessed state.
 
-Check mode returns the planned diff and operation descriptions without a
-backup or device writes. On a successful apply, `completed_operations` records
-the writes confirmed by the client. A policy or preflight failure remains an
-original validation or policy error and occurs before backup and writes.
+Policy failures are separate structured violations, while non-blocking policy
+conditions are warnings.
 
-If backup, a write, or verification fails, the Ansible result and
-other structured callers receive `JTComApplyError.as_result()` with
-`backup_file`, `completed_operations`, `failed_operation`,
-`original_exception`, `write_attempted`, and best-effort `readback` or
-`readback_error` fields. `failed_operation` can identify the backup or
-verification phase. The original exception object remains available as
-`exc.original_exception` and is preserved as the exception cause. Once a POST
-may have been attempted, `changed` is conservatively `true`, including when
-the first write fails. Verification failures include `remaining_diff`.
-No automatic rollback is attempted.
-
-Verification failures retain the exact readback snapshot used to compute
-`remaining_diff`. A recovery read is attempted only when no usable verification
-snapshot exists, such as when the verification read itself fails. Returned diffs
-reflect effective membership after policy/fallback resolution; an effective
-no-op has no changes in its diff, while advisory warnings remain available.
-
-### Referenced VLANs
-
-Port-centric `access_vlan`, `native_vlan`, `trunk_add_vlans`, and
-`trunk_set_vlans` must reference existing VLANs or VLANs explicitly declared
-with `state="present"`. Unknown references fail validation by default. Set
-`ApplyPolicy(auto_create_referenced_vlans=True)` to include their creation in
-the plan. VLAN IDs must be integers in 1..4094.
-
-A reference to a VLAN explicitly marked `state="absent"` is always a conflict.
-`trunk_remove_vlans` never creates VLANs: unknown removal targets fail validation
-even when auto-creation is enabled.
-
-### VLAN Membership Policy
-
-Potentially destructive or ambiguous VLAN membership changes are policy-gated:
-
-- Access/trunk transitions require `allow_port_mode_change=True`.
-- Membership the backend cannot express, including tagged-only ports without
-  an untagged/native VLAN, is always blocked.
-
-- Untagged/native VLAN moves fail by default. Set `allow_untagged_move=True`
-  only when moving a port from one untagged/native VLAN to another is intended.
-- Deleting a VLAN that is still tagged or untagged on any port fails by default.
-  Set `allow_vlan_delete_in_use=True` to auto-detach affected ports before deletion.
-- If a changed port would otherwise end up with no VLAN membership, the policy
-  layer maps it explicitly to access VLAN 1 and emits a structured
-  `mode_none_mapped_to_vlan1` warning. This fallback can still trigger
-  access/trunk protection or untagged-move protection for the effective result.
-
-### Policy Results
-
-Policy validation runs identically in check mode and real apply. `warnings` are
-advisory; `violations` are blocking. Both use structured records with common fields:
-
-- `type`
-- `entity`
-- `message`
-- `port_id` or `vlan_id` when applicable
-- `hint`
-
-Risk records include:
-
-- `untagged_move`
-- `vlan_delete_in_use`
-- `mode_none_mapped_to_vlan1`
-- `port_mode_change`
-- `safety_port_shutdown` (violation only)
-- `unsupported_vlan_port_mode` (violation only)
-
-Override flags move the corresponding permitted risk records into `warnings`.
-Safety-port and unsupported-membership violations are not bypassed by those flags.
-
----
-
-## Python Usage
-
-### Read-Only Example
+## Python example
 
 ```python
-from cgiswitch import JTComConnectionOptions, JTComSwitch
+from cgiswitch import ApplyPolicy, JTComConnectionOptions, JTComSwitch
+from cgiswitch.model.config import DeviceConfig
+from cgiswitch.model.port import PortConfig
+from cgiswitch.model.vlan import VlanConfig
+
+desired = DeviceConfig(
+    vlans={
+        10: VlanConfig(vlan_id=10, state="present"),
+        20: VlanConfig(vlan_id=20, state="present"),
+    },
+    ports={
+        7: PortConfig(
+            port_id=7,
+            native_vlan=10,
+            trunk_set_vlans=[20],
+        ),
+    },
+)
 
 with JTComSwitch(
     "192.0.2.1",
     "admin",
     "secret",
     connection=JTComConnectionOptions(verify_tls=False),
+    policy=ApplyPolicy(safety_port_id=6),
 ) as switch:
-    print(switch.read_device_info())
-    print(switch.read_ports())
-    print(switch.read_vlans())
+    preview = switch.apply(desired, check_mode=True)
+    print(preview["diff"], preview["warnings"], preview["violations"])
 ```
 
-### Apply Example
+Use `check_mode=True` for a dry run. A real apply repeats planning and policy
+checks against fresh device state before issuing writes. See the runnable scripts
+in [`examples/`](examples/).
 
-Use `apply()` when you want to combine VLAN changes, port admin
-changes, and port-centric VLAN membership in one plan.
+## Ansible examples
 
-```python
-from cgiswitch import JTComConnectionOptions, JTComSwitch
-from cgiswitch.model.config import DeviceConfig
-from cgiswitch.model.port import PortConfig
-from cgiswitch.model.vlan import VlanConfig
-
-with JTComSwitch(
-    "192.0.2.1", "admin", "secret",
-    connection=JTComConnectionOptions(verify_tls=False),
-) as switch:
-    result = switch.apply(
-        DeviceConfig(
-            vlans={
-                100: VlanConfig(vlan_id=100, name="Servers", state="present"),
-                200: VlanConfig(vlan_id=200, name="Voice", state="present"),
-                300: VlanConfig(vlan_id=300, name="Storage", state="present"),
-            },
-            ports={
-                1: PortConfig(
-                    port_id=1,
-                    admin_up=True,
-                    access_vlan=100,
-                ),
-                7: PortConfig(
-                    port_id=7,
-                    native_vlan=100,
-                    trunk_set_vlans=[200, 300],
-                ),
-            },
-        ),
-        check_mode=True,
-    )
-    print(result["diff"])
-```
-
-### Instance Policy Example
-
-Set the policy when constructing the switch. Every `apply()` call uses that
-instance policy; per-call policy overrides are not supported.
-
-```python
-from cgiswitch import ApplyPolicy, JTComConnectionOptions, JTComSwitch
-from cgiswitch.model.config import DeviceConfig
-from cgiswitch.model.vlan import VlanConfig
-
-desired = DeviceConfig(vlans={20: VlanConfig(vlan_id=20, state="absent")})
-policy = ApplyPolicy(allow_vlan_delete_in_use=True)
-with JTComSwitch(
-    "192.0.2.1", "admin", "secret",
-    connection=JTComConnectionOptions(verify_tls=False),
-    policy=policy,
-) as switch:
-    result = switch.apply(desired, check_mode=True)
-    print(result["warnings"], result["violations"])
-```
-
-### Dry-Run Example
-
-Use `switch.apply(desired, check_mode=True)` for a dry run. It returns planned
-diffs, advisory `warnings`, structured `violations`, and `blocked` without backup
-or device writes. A forbidden change still has `changed=True` when the requested
-plan differs from current state:
+Use the collection through a local connection. Store credentials in Ansible
+variables or a vault rather than in a playbook.
 
 ```yaml
-changed: true
-blocked: true
-violations:
-  - type: safety_port_shutdown
-    entity: port
-    port_id: 6
-    vlan_id: null
-    message: Port 6 is the safety port and cannot be disabled.
-    hint: Select a different safety_port_id only after securing management access.
-backup_file: ""
-applied: []
+- name: Preview an incremental change
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Plan switch changes
+      check_mode: true
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ jtcom_host }}"
+        username: "{{ jtcom_user }}"
+        password: "{{ jtcom_pass }}"
+        vlans:
+          10:
+            state: present
+          20:
+            state: present
+        ports:
+          7:
+            native_vlan: 10
+            trunk_set_vlans: [20]
 ```
 
-The same real apply raises `JTComPolicyError` before backup or any write; inspect
-`exc.violations` for the same records. Import it from `cgiswitch`. Validation
-errors such as unknown VLAN references still raise `ValueError` in both modes.
+Collection examples include [check mode](galaxy/bronweg/cgiswitch/examples/check_mode.yml),
+[automatic referenced-VLAN creation](galaxy/bronweg/cgiswitch/examples/auto_create.yml),
+[access ports](galaxy/bronweg/cgiswitch/examples/access_port.yml),
+[trunks](galaxy/bronweg/cgiswitch/examples/trunk_port.yml),
+[policy overrides](galaxy/bronweg/cgiswitch/examples/policy_overrides.yml),
+[VLAN creation](galaxy/bronweg/cgiswitch/examples/vlan_create.yml),
+[VLAN deletion](galaxy/bronweg/cgiswitch/examples/vlan_delete.yml), and
+[port patches](galaxy/bronweg/cgiswitch/examples/port_patch.yml).
 
-Runnable scripts in [`examples/`](examples):
-- [`examples/read_device_info.py`](examples/read_device_info.py)
-- [`examples/read_ports.py`](examples/read_ports.py)
-- [`examples/read_vlans.py`](examples/read_vlans.py)
-- [`examples/apply_vlan.py`](examples/apply_vlan.py)
-- [`examples/apply.py`](examples/apply.py)
-- [`examples/toggle_port_admin.py`](examples/toggle_port_admin.py)
-
----
-
-## Ansible Collection
-
-The supported Ansible interface is the `bronweg.cgiswitch` Galaxy collection.
-
-A packaged collection lives at `galaxy/bronweg/cgiswitch/`.
-FQCN: `bronweg.cgiswitch.jtcom_config`
-
-Build and install:
-
-```bash
-ansible-galaxy collection build --force galaxy/bronweg/cgiswitch
-ansible-galaxy collection install bronweg-cgiswitch-0.1.0.tar.gz
-```
-
-Example task:
-
-```yaml
-- name: Configure JTCom switch
-  bronweg.cgiswitch.jtcom_config:
-    host: "{{ jtcom_host }}"
-    username: "{{ jtcom_user }}"
-    password: "{{ jtcom_pass }}"
-    verify_tls: false
-    vlans:
-      10:
-        name: Management
-        untagged_add: [1]
-      20:
-        name: Data
-        tagged_add: [7]
-      30:
-        name: Voice
-        untagged_add: [2, 3]
-      99:
-        state: absent
-    ports:
-      7:
-        native_vlan: 10
-        trunk_add_vlans: [20, 30]
-      8:
-        admin_up: true
-        speed: Auto
-        flow_control: false
-```
-
-The collection supports Ansible `--check` (dry-run) mode. It uses production-safe
-TLS verification by default and protects management port 6 from administrative shutdown.
-
-Collection examples:
-- [`galaxy/bronweg/cgiswitch/examples/access_port.yml`](galaxy/bronweg/cgiswitch/examples/access_port.yml)
-- [`galaxy/bronweg/cgiswitch/examples/trunk_port.yml`](galaxy/bronweg/cgiswitch/examples/trunk_port.yml)
-- [`galaxy/bronweg/cgiswitch/examples/policy_overrides.yml`](galaxy/bronweg/cgiswitch/examples/policy_overrides.yml)
-- [`galaxy/bronweg/cgiswitch/examples/vlan_create.yml`](galaxy/bronweg/cgiswitch/examples/vlan_create.yml)
-- [`galaxy/bronweg/cgiswitch/examples/vlan_delete.yml`](galaxy/bronweg/cgiswitch/examples/vlan_delete.yml)
-- [`galaxy/bronweg/cgiswitch/examples/port_patch.yml`](galaxy/bronweg/cgiswitch/examples/port_patch.yml)
-
-Inspect module documentation:
+Inspect module arguments with:
 
 ```bash
 ansible-doc bronweg.cgiswitch.jtcom_config
 ```
 
----
-
-## Project Structure
-
-```
-cgiswitch/
-  src/cgiswitch/
-    switch.py          # JTComSwitch orchestration API
-    client/            # HTTP session, request helpers, VLAN/port write ops
-    parser/            # HTML → Python object parsers
-    model/             # Typed dataclass models (VlanConfig, PortConfig, DeviceConfig …)
-    utils/             # Diff/plan engines (vlan_diff, device_diff, port_diff, render)
-    vendor/jtcom/      # JTCom-specific endpoint paths and field mappings
-  galaxy/
-    bronweg/cgiswitch/ # Ansible Galaxy collection (bronweg.cgiswitch, v0.1.0)
-      galaxy.yml       # Collection manifest
-      plugins/action/  # Action plugin
-      plugins/modules/ # Module stub (ansible-doc / Galaxy)
-      examples/        # Ready-to-run playbooks
-  tests/
-    unit/              # Unit tests for parsers, diff engines, and payloads
-    fixtures/          # HTML snapshots from real devices
-  examples/            # Runnable Python usage examples
-  docs/                # Developer documentation
-```
-
-## Architecture Note
-
-Runtime flow:
-
-1. normalize input
-2. merge VLAN-centric and port-centric syntax
-3. plan and apply policy on canonical state
-4. compile the complete backend operation list before backup or any write
-5. read JTCom state back and normalize to canonical state
-6. verify canonical expected vs canonical actual
-
----
-
 ## Development
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, testing, and contribution guidelines.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and
+checks. The main implementation is under `src/cgiswitch`; the collection is
+under `galaxy/bronweg/cgiswitch`; parser and apply behavior is covered by
+fixture-backed tests under `tests/`.
 
 ```bash
-# Run tests
 pytest
-
-# Lint + type-check
 ruff check .
-mypy src/
-
-# Build the Galaxy collection
-cd galaxy/bronweg/cgiswitch
-ansible-galaxy collection build --force
+mypy src galaxy/bronweg/cgiswitch/plugins/module_utils
+ansible-galaxy collection build --force galaxy/bronweg/cgiswitch
 ```
-
----
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT; see [LICENSE](LICENSE).

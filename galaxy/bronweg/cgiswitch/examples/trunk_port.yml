@@ -6,7 +6,7 @@
 
   vars:
     switch_host: 192.0.2.1
-    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin', true) }}"
     switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
   tasks:
@@ -15,7 +15,7 @@
         host: "{{ switch_host }}"
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
-        verify_tls: false
+        # Required when port 5 is currently in access mode; omit after it is a trunk.
         allow_port_mode_change: true
         vlans:
           10:

@@ -6,7 +6,7 @@
 
   vars:
     switch_host: 192.0.2.1
-    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin', true) }}"
     switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
   tasks:
@@ -15,12 +15,10 @@
         host: "{{ switch_host }}"
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
-        verify_tls: false
         vlans:
           10:
             name: Management
-            untagged_ports: [1]
+            tagged_add: [1]
           20:
             name: Data
-            tagged_ports: [7]
-            untagged_ports: [1, 2, 3]
+            tagged_add: [2, 3]

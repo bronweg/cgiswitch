@@ -19,6 +19,13 @@ description:
   - Supports Ansible check mode (dry-run) natively.
   - Ports are 1-based everywhere.
   - >-
+    This action runs in the Ansible controller process. The collection parses
+    and validates input with module utilities, then calls the cgiswitch Python
+    library directly.
+  - >-
+    The JTCom backend uses the switch firmware's CGI interface. Applies have
+    no transactional commit and no automatic rollback after a failed write.
+  - >-
     VLAN membership input uses canonical on-wire semantics: C(untagged) means
     the VLAN sent untagged on wire, and C(tagged) means VLANs sent tagged on wire.
 options:
@@ -36,7 +43,12 @@ options:
     type: str
     no_log: true
   verify_tls:
-    description: Verify TLS certificates when connecting over HTTPS.
+    description: >
+      Verify TLS certificates when connecting over HTTPS. For a host without
+      a scheme, true selects HTTPS on port 443 and false selects HTTP on port 80.
+      An explicit http:// or https:// in C(host) determines the scheme directly.
+      An explicit HTTPS host with false still uses HTTPS, with certificate
+      verification disabled.
     type: bool
     default: true
   backup_before_change:
@@ -126,7 +138,14 @@ options:
     type: dict
 notes:
   - "Run this module on the Ansible controller (C(connection: local))."
-  - cgiswitch must be installed in the Python environment used by Ansible.
+  - >-
+    ansible-core 2.14.0 or newer is required. This is the Ansible controller
+    runtime, not an Ansible distribution version.
+  - >-
+    Install a cgiswitch checkout or package matching the collection checkout
+    in the Python environment used by the Ansible controller. Both current
+    projects are version 0.1.0, but the action plugin does not enforce an
+    exact package version at runtime.
   - Raw task arguments are validated by the action plugin before opening a
     switch connection. Unknown top-level and nested keys are rejected.
   - Boolean top-level options are strict booleans; string values are rejected
@@ -142,10 +161,15 @@ notes:
   - Access/trunk mode changes are blocked by default.
   - The protected management port defaults to port 6 and can be changed with
     C(safety_port_id).
+  - C(safety_port_id) must be a positive integer. Malformed values and wrong
+    types are rejected instead of being silently coerced; valid booleans,
+    integer IDs, and list members are accepted where their fields require them.
   - If a changed port would otherwise have no VLAN membership, it is mapped to
     access VLAN 1 and a structured warning is returned.
 requirements:
-  - cgiswitch == 0.1.0
+  - >-
+    A cgiswitch checkout or package matching the collection checkout, installed
+    in the Ansible controller Python environment
 author:
   - cgiswitch contributors
 """
