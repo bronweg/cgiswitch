@@ -31,7 +31,7 @@ jobs:
       - name: Run Ruff
         run: ruff check .
       - name: Run Mypy
-        run: mypy src
+        run: mypy src galaxy/bronweg/cgiswitch/plugins/module_utils
       - name: Run tests
         run: pytest
       - name: Build Python distribution

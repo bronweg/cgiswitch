@@ -68,24 +68,50 @@ options:
       Disabled by default; unknown references fail validation.
     type: bool
     default: false
+  safety_port_id:
+    description: >
+      Positive integer ID of the protected management port. Changes that would
+      administratively disable this port are blocked by policy.
+      Strings, booleans, and non-integer values are rejected without coercion.
+    type: int
+    default: 6
   vlans:
     description: >
-      Incremental VLAN changes, keyed by VLAN ID (string or int).
-      VLAN-centric membership fields are expressed in canonical on-wire terms
-      and may contain C(tagged_ports), C(untagged_ports), C(tagged_add),
-      C(tagged_remove), C(tagged_set), C(untagged_add), C(untagged_remove),
-      C(untagged_set), C(name), and C(state).
-      Ports are 1-based IDs. Omitting C(state) defaults to C(present).
-      VLANs not listed are untouched. VLAN 1 cannot be deleted.
+      Incremental VLAN changes, keyed by VLAN ID. Map keys may be integers or
+      ASCII decimal strings and are normalized to integers; duplicate keys
+      after normalization are rejected. IDs must be in the range 1..4094.
+      Each entry is a map with only these keys: C(name) (string or null),
+      C(tagged_ports), C(untagged_ports), C(tagged_add), C(tagged_remove),
+      C(tagged_set), C(untagged_add), C(untagged_remove), and
+      C(untagged_set) (lists of strict integer port IDs), and C(state)
+      (C(present) or C(absent)). A null optional value leaves that field
+      unchanged. Null maps and null entries are rejected; an empty map means
+      no field-level change. Unknown entry keys are rejected.
+      Ports are 1-based and are checked against the device after validation.
+      Omitting C(state) defaults to C(present). VLANs not listed are
+      untouched. VLAN 1 cannot be deleted.
     type: dict
   ports:
     description: >
-      Incremental port changes, keyed by 1-based port ID (string or int).
-      Each entry may contain C(admin_up) (bool), C(speed) (str),
-      C(flow_control) (bool), and optional VLAN membership shortcuts:
-      C(access_vlan), C(native_vlan), C(trunk_add_vlans), C(trunk_remove_vlans),
-      and C(trunk_set_vlans). Port-centric VLAN input is translated to the same
-      canonical membership planner used for VLAN-centric syntax.
+      Incremental port changes, keyed by port ID. Map keys may be integers or
+      ASCII decimal strings and are normalized to integers; duplicate keys
+      after normalization are rejected. IDs must be at least 1 and are checked
+      against the device after validation. Each entry is a map containing only
+      C(admin_up) (strict bool), C(speed) (string), C(flow_control) (strict
+      bool), and the optional VLAN membership shortcuts C(access_vlan),
+      C(native_vlan), C(trunk_add_vlans), C(trunk_remove_vlans), and
+      C(trunk_set_vlans). VLAN IDs in scalar fields are strict integers in the
+      range 1..4094; quoted numeric values are rejected. VLAN lists contain
+      strict integer IDs in the same range. Optional null values leave the
+      corresponding field unchanged. Null maps and null entries are rejected.
+      C(speed) accepts C(Auto), C(10M/Half), C(10M/Full), C(100M/Half),
+      C(100M/Full), C(1000M/Full), C(2500M/Full), and C(10G/Full), plus
+      existing aliases such as C(1G/Full). Unknown speed strings are rejected.
+      C(trunk_set_vlans) cannot be combined with C(trunk_add_vlans) or
+      C(trunk_remove_vlans). Empty set lists clear tagged membership.
+      Unknown entry keys are rejected.
+      Port-centric VLAN input is translated to the same canonical membership
+      planner used for VLAN-centric syntax.
       C(access_vlan) selects access mode and clears existing tagged memberships.
       It cannot be combined with C(native_vlan) or any C(trunk_*) field.
       A trunk-to-access transition requires C(allow_port_mode_change=true).
@@ -95,19 +121,27 @@ options:
       unknown access/native/add/set references. Remove references never create
       VLANs and fail when unknown.
       Set C(admin_up: false) to administratively disable a port.
-      Ports not listed are untouched. Port 6 (management uplink) cannot be
-      administratively disabled.
+      Ports not listed are untouched. The port selected by C(safety_port_id)
+      cannot be administratively disabled.
     type: dict
 notes:
   - "Run this module on the Ansible controller (C(connection: local))."
   - cgiswitch must be installed in the Python environment used by Ansible.
+  - Raw task arguments are validated by the action plugin before opening a
+    switch connection. Unknown top-level and nested keys are rejected.
+  - Boolean top-level options are strict booleans; string values are rejected
+    instead of being coerced.
   - Use C(--check) for a safe dry-run that shows planned changes without applying them.
   - >
     Policy violations are returned as structured C(violations) with C(blocked: true);
-    advisory conditions remain in C(warnings).
+    advisory conditions remain in C(warnings). In check mode a blocked plan is
+    inspection-only: it reports the planned change and violations, does not
+    save a backup, and does not write to the switch.
   - Untagged/native VLAN moves are blocked by default.
   - VLAN delete-in-use is blocked by default.
   - Access/trunk mode changes are blocked by default.
+  - The protected management port defaults to port 6 and can be changed with
+    C(safety_port_id).
   - If a changed port would otherwise have no VLAN membership, it is mapped to
     access VLAN 1 and a structured warning is returned.
 requirements:
@@ -204,6 +238,7 @@ EXAMPLES = r"""
     allow_vlan_delete_in_use: true
 
 - name: Dry-run a change and inspect structured warnings
+  check_mode: true
   bronweg.cgiswitch.jtcom_config:
     host: 192.0.2.1
     username: "{{ jtcom_user }}"
@@ -212,7 +247,24 @@ EXAMPLES = r"""
     vlans:
       61:
         tagged_add: [1, 2, 3, 4, 5]
+
+- name: Inspect a blocked plan with a custom safety port
   check_mode: true
+  bronweg.cgiswitch.jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    verify_tls: false
+    safety_port_id: 5
+    ports:
+      5:
+        admin_up: false
+  register: jtcom_preview
+
+- name: Show policy violations without changing the switch
+  ansible.builtin.debug:
+    var: jtcom_preview.violations
+  when: jtcom_preview.blocked | default(false)
 
 - name: Create a VLAN referenced only by a port patch
   bronweg.cgiswitch.jtcom_config:
@@ -228,49 +280,91 @@ EXAMPLES = r"""
 
 RETURN = r"""
 changed:
-  description: Whether any configuration change was made (or would be in check mode).
+  description: >
+    Whether the plan contains changes, or whether a write may have been
+    attempted before an apply failure. In check mode this is true when the
+    plan would change the device, including a policy-blocked plan.
   type: bool
-  returned: always
+  returned: on success, check mode, input validation failure, policy failure, or apply failure
 diff:
   description: >
     Structured diff dict from the cgiswitch plan engine, containing
     C(summary), C(total_changes), and C(changes) list.
   type: dict
-  returned: always
+  returned: on success or check mode
 backup_file:
-  description: Path to the config backup file saved before changes, or empty string.
+  description: >
+    Path to the config backup file saved before changes, or an empty string
+    when no backup was made.
   type: str
-  returned: always
+  returned: on success, check mode, policy failure, or apply failure
 applied:
-  description: List of change keys that were applied (empty in check mode).
+  description: >
+    List of operation keys confirmed as completed. It is empty in check mode
+    and before the first write; an apply failure includes only operations
+    confirmed before the failed operation.
   type: list
   elements: str
-  returned: always
-completed_operations:
-  description: Ordered operation records completed before a failure, or on success.
+  returned: on success, check mode, policy failure, or apply failure
+operations:
+  description: >
+    Deterministically ordered operation records planned for execution. Check
+    mode exposes these records without taking a backup or writing to the
+    device. A policy-blocked check has no executable operations.
   type: list
   elements: dict
-  returned: always
+  returned: on success or check mode
+completed_operations:
+  description: >
+    Ordered operation records confirmed by the client. On success this is the
+    complete applied operation list; in check mode it is empty; on apply
+    failure it contains only operations completed before the failure.
+  type: list
+  elements: dict
+  returned: on success, check mode, or apply failure
 failed_operation:
   description: Operation record that failed, when an apply failure occurs.
   type: dict
-  returned: on failure
+  returned: on apply failure
 original_exception:
   description: Type and message of the original apply exception.
   type: dict
-  returned: on failure
+  returned: on apply failure
 readback:
-  description: Best-effort device readback captured after a partial failure.
+  description: >
+    Best-effort actual device snapshot captured after an apply failure. It is
+    the post-write verification snapshot when verification readback succeeded;
+    otherwise it is a recovery readback when one was possible. The key is
+    present on every apply failure and is null when no snapshot was obtained.
   type: dict
-  returned: on failure
+  returned: on apply failure
 readback_error:
-  description: Type and message of a failed best-effort readback.
+  description: >
+    Type and message of a failed best-effort readback, or null when no
+    recovery read was needed or it succeeded.
   type: dict
-  returned: on failure
+  returned: on apply failure
 write_attempted:
   description: Whether any write may have been attempted before failure.
   type: bool
-  returned: on failure
+  returned: on apply failure
+remaining_diff:
+  description: >
+    Residual canonical diff from a verification failure. It is computed from
+    the actual snapshot in C(readback) and is returned only when verification
+    found state that did not match the effective target.
+  type: dict
+  returned: on verification failure
+changed_ports:
+  description: Sorted 1-based port IDs whose effective VLAN membership changes.
+  type: list
+  elements: int
+  returned: on success or check mode
+changed_vlans:
+  description: Sorted VLAN IDs whose effective VLAN membership changes.
+  type: list
+  elements: int
+  returned: on success or check mode
 warnings:
   description: >
     Advisory warning objects for permitted risks and explicit fallback behavior.
@@ -279,18 +373,18 @@ warnings:
     C(untagged_move), C(vlan_delete_in_use), C(mode_none_mapped_to_vlan1),
     and C(port_mode_change).
   type: list
-  returned: always
+  returned: on success, check mode, or policy failure
 violations:
   description: >
     Structured policy violations that block an apply. In check mode these are
     reported with C(blocked: true); in normal mode the action fails before
     backup or writes.
   type: list
-  returned: always
+  returned: on success, check mode, or policy failure
 blocked:
   description: Whether policy violations block the requested operation.
   type: bool
-  returned: always
+  returned: on success, check mode, or policy failure
 """
 
 from ansible.module_utils.basic import AnsibleModule  # noqa: E402  # type: ignore[import-untyped]
@@ -308,6 +402,7 @@ def main() -> None:
             allow_untagged_move=dict(type="bool", default=False),
             allow_vlan_delete_in_use=dict(type="bool", default=False),
             auto_create_referenced_vlans=dict(type="bool", default=False),
+            safety_port_id=dict(type="int", default=6),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),

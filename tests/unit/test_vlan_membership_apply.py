@@ -760,24 +760,20 @@ def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
     }
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        pathlib.Path("galaxy/bronweg/cgiswitch/plugins/action/jtcom_config.py"),
-    ],
-)
-def test_action_plugin_int_list_helper_preserves_missing_none_and_empty_list(
-    path: pathlib.Path,
-) -> None:
-    module = _load_action_plugin_module(path)
+def test_ansible_parser_preserves_missing_none_and_empty_list() -> None:
+    from ansible_collections.bronweg.cgiswitch.plugins.module_utils.ansible_input import (
+        parse_desired_config,
+    )
 
-    assert module._int_list_or_none({}, "tagged_ports") is None
-    assert module._int_list_or_none({"tagged_ports": None}, "tagged_ports") is None
-    assert module._int_list_or_none({"tagged_ports": []}, "tagged_ports") == []
-    assert module._int_list_or_none({"tagged_ports": ["1"]}, "tagged_ports") == [1]
-    assert module._int_or_none({}, "access_vlan") is None
-    assert module._int_or_none({"access_vlan": None}, "access_vlan") is None
-    assert module._int_or_none({"access_vlan": "10"}, "access_vlan") == 10
+    for entry in ({}, {"tagged_ports": None}):
+        assert parse_desired_config({"vlans": {10: entry}}).vlans[10].tagged_ports is None
+    desired = parse_desired_config({
+        "vlans": {10: {"tagged_ports": []}},
+        "ports": {1: {"access_vlan": None}, 2: {"access_vlan": 10}},
+    })
+    assert desired.vlans[10].tagged_ports == []
+    assert desired.ports[1].access_vlan is None
+    assert desired.ports[2].access_vlan == 10
 
 
 @pytest.mark.parametrize(
