@@ -124,6 +124,20 @@ from current state or explicitly supplied in the desired configuration. Unknown
 administrative state and flow control are never replaced with guessed defaults.
 These preflight checks also run in check mode.
 
+### Session Expiry and Backup Validation
+
+GET, POST, and backup downloads share the same bounded authentication retry.
+An explicit expiry response (CGI `code=11`, HTTP 401, or a recognized login
+response) triggers at most one login and one retry of the original request.
+Repeated expiry raises `JTComAuthError` and clears the authenticated state.
+Failed login is not retried. Network errors, HTTP 403/5xx from an operation,
+and non-auth CGI operation errors do not trigger replay.
+
+Backup downloads must be non-empty and must not be recognizable HTML, login,
+or error responses. Accepted bytes are returned unchanged. No backup magic,
+signature, or minimum length is assumed without device evidence. These checks
+detect obvious invalid responses; they do not prove that a backup is restorable.
+
 ### Apply Orchestration and Failure Reporting
 
 The apply path compiles and validates the complete operation list before a
