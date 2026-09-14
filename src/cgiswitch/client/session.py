@@ -295,14 +295,18 @@ class JTComSession:
             raise JTComParseError(f"Non-JSON response from {endpoint!r}") from exc
         if not isinstance(result, dict) or "code" not in result:
             raise JTComParseError(f"Missing CGI response code from {endpoint!r}")
-        code = result["code"]
-        if isinstance(code, bool) or not isinstance(code, (int, str)):
-            raise JTComParseError(f"Invalid CGI response code from {endpoint!r}")
         try:
-            result["code"] = int(code)
+            result["code"] = _normalize_cgi_code(result["code"])
         except ValueError as exc:
             raise JTComParseError(f"Invalid CGI response code from {endpoint!r}") from exc
         return result
+
+
+def _normalize_cgi_code(code: object) -> int:
+    """Normalize integer CGI codes, including whitespace in numeric strings."""
+    if isinstance(code, bool) or not isinstance(code, (int, str)):
+        raise ValueError("CGI response code must be an integer or numeric string")
+    return int(code)
 
 
 def _is_auth_expired(response: requests.Response) -> bool:
@@ -316,10 +320,11 @@ def _is_auth_expired(response: requests.Response) -> bool:
         except ValueError:
             pass
         else:
-            if (isinstance(payload, dict)
-                    and type(payload.get("code")) in (int, str)
-                    and payload.get("code") in (CODE_AUTH_EXPIRED, "11")):
-                return True
+            if isinstance(payload, dict):
+                try:
+                    return _normalize_cgi_code(payload.get("code")) == CODE_AUTH_EXPIRED
+                except ValueError:
+                    pass
     if not text.startswith("<"):
         return False
     soup = BeautifulSoup(text, "html.parser")

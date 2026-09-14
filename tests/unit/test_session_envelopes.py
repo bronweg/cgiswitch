@@ -34,11 +34,12 @@ def test_login_http_auth_failure_is_typed_and_not_retried(status: int) -> None:
     assert len(responses.calls) == 1
 
 
+@pytest.mark.parametrize("code", ["11", " 11", "11 ", "\t11\n"])
 @responses.activate
-def test_string_cgi_codes_follow_the_same_bounded_retry() -> None:
+def test_string_cgi_codes_follow_the_same_bounded_retry(code: str) -> None:
     session = JTComSession(BASE, JTComCredentials("admin", "secret"))
     session._logged_in = True
-    responses.add(responses.POST, BASE + "/port.cgi", body='{"code":"11"}')
+    responses.add(responses.POST, BASE + "/port.cgi", json={"code": code})
     responses.add(responses.POST, BASE + "/login.cgi", body='{"code":"0"}')
     responses.add(responses.POST, BASE + "/port.cgi", body='{"code":"0", "data":"ok"}')
     assert session.post("/port.cgi") == {"code": 0, "data": "ok"}
