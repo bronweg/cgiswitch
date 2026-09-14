@@ -238,6 +238,13 @@ Inspect module arguments with:
 ansible-doc bronweg.cgiswitch.jtcom_config
 ```
 
+## Hardware validation
+
+The [hardware checklist](docs/HARDWARE_VALIDATION.md) and
+[evidence template](docs/hardware/RESULTS_TEMPLATE.md) describe the pending
+real-device validation. Preparation scripts and mocked tests do not complete
+that stage. No hardware result is claimed by this checkout.
+
 ## Development
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and

@@ -60,7 +60,7 @@ Run from the repository root in the activated environment:
 ```bash
 python tools/check_language.py
 ruff check .
-mypy src galaxy/bronweg/cgiswitch/plugins/module_utils
+mypy src galaxy/bronweg/cgiswitch/plugins/module_utils tools/hardware_validate.py
 pytest
 python -m build --outdir /tmp/cgiswitch-python-dist
 ansible-galaxy collection build --force --output-path /tmp/cgiswitch-galaxy-dist galaxy/bronweg/cgiswitch

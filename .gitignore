@@ -55,3 +55,6 @@ backups/
 
 # Generated Galaxy collection archives
 bronweg-cgiswitch-*.tar.gz
+
+# Private hardware evidence, raw device state, and backups
+hardware-evidence/
