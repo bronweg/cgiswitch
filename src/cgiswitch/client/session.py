@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
+import requests
+from bs4 import BeautifulSoup
+
+from cgiswitch.client.backup import validate_backup_response
 from cgiswitch.client.errors import (
     CODE_AUTH_EXPIRED,
     CODE_OK,
     JTComAuthError,
     JTComParseError,
+    JTComResponseError,
     JTComSwitchError,
 )
 from cgiswitch.client.http import JTComHTTP
@@ -42,7 +50,7 @@ class JTComSession:
     - Cookie-based authentication via ``login.cgi``.
     - Automatic ``page=inside`` and ``stamp=<unix_ts>`` injection for GET.
     - Automatic ``page=inside`` injection for POST form data.
-    - Single transparent re-login on ``code=11`` (auth expired) responses.
+    - One transparent re-login/retry on explicit auth expiry for every request type.
 
     Args:
         base_url: Switch base URL, e.g. ``http://192.168.1.1``.
@@ -79,13 +87,19 @@ class JTComSession:
             JTComAuthError: If the switch rejects the credentials.
             JTComParseError: If the response cannot be decoded as JSON.
         """
-        resp = self._http.post_form(
-            LOGIN,
-            data={
-                "username": self._credentials.username,
-                "password": self._credentials.password,
-            },
-        )
+        self._logged_in = False
+        try:
+            resp = self._http.post_form(
+                LOGIN,
+                data={
+                    "username": self._credentials.username,
+                    "password": self._credentials.password,
+                },
+            )
+        except JTComResponseError as exc:
+            if exc.status_code in (401, 403):
+                raise JTComAuthError(f"Login rejected with HTTP {exc.status_code}") from exc
+            raise
         result = self._parse_json(resp.text, LOGIN)
         if result["code"] != CODE_OK:
             self._logged_in = False
@@ -127,6 +141,8 @@ class JTComSession:
         """Perform an authenticated GET and return the response text.
 
         Injects ``page=inside`` and ``stamp=<unix_timestamp>`` query params.
+        Explicit expiry triggers at most one login and retry; repeated expiry
+        raises :exc:`JTComAuthError`.
 
         Args:
             path: CGI path relative to the switch base URL.
@@ -135,14 +151,13 @@ class JTComSession:
         Returns:
             Response body as a string.
         """
-        self.ensure_session()
         injected: dict[str, str] = {
             "page": _PAGE_PARAM,
             "stamp": str(int(time.time())),
         }
         if params:
             injected.update(params)
-        resp = self._http.get(path, params=injected)
+        resp = self._authenticated_request(path, lambda: self._http.get(path, params=injected))
         return resp.text
 
     def post(
@@ -165,16 +180,11 @@ class JTComSession:
             Parsed JSON response as ``{"code": int, "data": str, ...}``.
 
         Raises:
-            JTComSwitchError: If the switch returns a non-zero, non-11 code
-                              (or still fails after the retry).
+            JTComAuthError: If authentication expires again after one retry.
+            JTComSwitchError: If the switch returns a non-auth operation error.
         """
-        self.ensure_session()
-        result = self._do_post(path, data)
-
-        if result["code"] == CODE_AUTH_EXPIRED:
-            logger.debug("Auth expired (%s); re-logging in", path)
-            self.login()
-            result = self._do_post(path, data)
+        response = self._authenticated_request(path, lambda: self._do_post(path, data))
+        result = self._parse_json(response.text, path)
 
         if result["code"] != CODE_OK:
             raise JTComSwitchError(
@@ -194,18 +204,21 @@ class JTComSession:
         headers, so callers are responsible for choosing a filename).
 
         Returns:
-            Raw binary content of the switch configuration backup.
+            Non-empty backup bytes, unchanged. HTML/login/error responses
+            are rejected; no undocumented binary signature is required.
         """
-        self.ensure_session()
-        resp = self._http.get(
+        response = self._authenticated_request(
             CONFIG_BACKUP,
-            params={
-                "cmd": "conf_backup",
-                "page": _PAGE_PARAM,
-                "stamp": str(int(time.time())),
-            },
+            lambda: self._http.get(
+                CONFIG_BACKUP,
+                params={
+                    "cmd": "conf_backup",
+                    "page": _PAGE_PARAM,
+                    "stamp": str(int(time.time())),
+                },
+            ),
         )
-        return resp.content
+        return validate_backup_response(response)
 
     def close(self) -> None:
         """Logout and close the underlying HTTP session."""
@@ -235,8 +248,8 @@ class JTComSession:
         self,
         path: str,
         data: dict[str, str] | list[tuple[str, str]] | None,
-    ) -> dict[str, object]:
-        """Send one POST (with page injection) and parse JSON."""
+    ) -> requests.Response:
+        """Send one POST with page injection, preserving repeated form fields."""
         form: dict[str, str] | list[tuple[str, str]]
         if isinstance(data, list):
             # Preserve repeated keys (e.g. del=10&del=20); inject page at front.
@@ -246,18 +259,81 @@ class JTComSession:
             if data:
                 form_dict.update(data)
             form = form_dict
-        resp = self._http.post_form(path, data=form)
-        return self._parse_json(resp.text, path)
+        return self._http.post_form(path, data=form)
+
+    def _authenticated_request(
+        self, path: str, send: Callable[[], requests.Response],
+    ) -> requests.Response:
+        """Retry only explicit expiry, at most once, without recursive request calls."""
+        self.ensure_session()
+        for attempt in range(2):
+            response_error: JTComResponseError | None = None
+            try:
+                response = send()
+            except JTComResponseError as exc:
+                if exc.status_code != 401:
+                    raise
+                response_error = exc
+            else:
+                if not _is_auth_expired(response):
+                    return response
+            self._logged_in = False
+            if attempt == 1:
+                raise JTComAuthError(
+                    f"Authentication expired again after one retry for {path!r}"
+                ) from response_error
+            logger.debug("Authentication expired for %s; re-authenticating once", path)
+            self.login()
+        raise AssertionError("Authentication retry loop exhausted unexpectedly")
 
     @staticmethod
     def _parse_json(text: str, endpoint: str) -> dict[str, object]:
-        """Parse *text* as JSON, raising :exc:`.JTComParseError` on failure."""
-        import json
-
+        """Validate a CGI JSON envelope and normalize its integer status code."""
         try:
-            result: dict[str, object] = json.loads(text)
+            result = json.loads(text.lstrip("\ufeff \t\r\n"))
         except (json.JSONDecodeError, ValueError) as exc:
-            raise JTComParseError(
-                f"Non-JSON response from {endpoint!r}: {text[:200]!r}"
-            ) from exc
+            raise JTComParseError(f"Non-JSON response from {endpoint!r}") from exc
+        if not isinstance(result, dict) or "code" not in result:
+            raise JTComParseError(f"Missing CGI response code from {endpoint!r}")
+        try:
+            result["code"] = _normalize_cgi_code(result["code"])
+        except ValueError as exc:
+            raise JTComParseError(f"Invalid CGI response code from {endpoint!r}") from exc
         return result
+
+
+def _normalize_cgi_code(code: object) -> int:
+    """Normalize integer CGI codes, including whitespace in numeric strings."""
+    if isinstance(code, bool) or not isinstance(code, (int, str)):
+        raise ValueError("CGI response code must be an integer or numeric string")
+    return int(code)
+
+
+def _is_auth_expired(response: requests.Response) -> bool:
+    """Recognize explicit auth responses without treating ordinary HTML as login."""
+    if urlsplit(response.url or "").path.rstrip("/").endswith(LOGIN):
+        return True
+    text = response.content.decode("utf-8", errors="replace").lstrip("\ufeff \t\r\n")
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            pass
+        else:
+            if isinstance(payload, dict):
+                try:
+                    return _normalize_cgi_code(payload.get("code")) == CODE_AUTH_EXPIRED
+                except ValueError:
+                    pass
+    if not text.startswith("<"):
+        return False
+    soup = BeautifulSoup(text, "html.parser")
+    for form in soup.find_all("form"):
+        password = form.find(
+            "input", attrs={"type": lambda value: str(value).lower() == "password"},
+        )
+        username = form.find("input", attrs={"name": "username"})
+        login_action = urlsplit(str(form.get("action", ""))).path.endswith(LOGIN)
+        if password is not None and (username is not None or login_action):
+            return True
+    return False
