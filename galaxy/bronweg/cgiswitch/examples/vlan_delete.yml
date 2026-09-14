@@ -6,7 +6,7 @@
 
   vars:
     switch_host: 192.0.2.1
-    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin', true) }}"
     switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
   tasks:
@@ -15,7 +15,8 @@
         host: "{{ switch_host }}"
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
-        verify_tls: false
+        # VLAN 99 must not be in use; use allow_vlan_delete_in_use only when
+        # automatic detachment of referencing ports is intentional.
         vlans:
           99:
             state: absent

@@ -6,7 +6,7 @@
 
   vars:
     switch_host: 192.0.2.1
-    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin', true) }}"
     switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
   tasks:
@@ -15,7 +15,8 @@
         host: "{{ switch_host }}"
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
-        verify_tls: false
+        # This assumes port 3 is already an access port in VLAN 20. The
+        # override permits changing its untagged VLAN to 30.
         allow_untagged_move: true
         vlans:
           30:
@@ -29,8 +30,32 @@
         host: "{{ switch_host }}"
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
-        verify_tls: false
+        # This assumes VLAN 61 is still referenced by a port. The override
+        # permits detaching that port before deleting the VLAN. If detaching
+        # leaves a port without membership, the mode and untagged-move
+        # overrides may also be required.
         allow_vlan_delete_in_use: true
         vlans:
           61:
             state: absent
+
+    - name: Allow an intentional access-to-trunk transition
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        # Use this when port 5 is currently access mode. If its native VLAN
+        # changes too, allow_untagged_move may also be required.
+        allow_port_mode_change: true
+        allow_untagged_move: true
+        vlans:
+          10:
+            state: present
+          20:
+            state: present
+          30:
+            state: present
+        ports:
+          5:
+            native_vlan: 10
+            trunk_set_vlans: [20, 30]

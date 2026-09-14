@@ -2,13 +2,16 @@
 
 This directory contains static HTML snapshots captured from real JTCom switch
 web interfaces. They are used as inputs to the HTML parser unit tests so that
-tests can run without a physical device.
+tests can run without a physical device. Fixture coverage does not establish
+hardware or firmware compatibility; validation of the current apply path on
+real hardware is still pending.
 
 ## Files
 
 | File | Source Page |
 |------|-------------|
 | `port_settings.html` | Port Settings page |
+| `port_stats.html` | Port operational status and statistics page |
 | `vlan_static.html` | Static VLAN configuration |
 | `vlan_port_based.html` | Port-based VLAN configuration |
 | `trunk_group.html` | Trunk Group configuration |

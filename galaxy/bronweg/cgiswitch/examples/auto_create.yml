@@ -1,5 +1,5 @@
 ---
-- name: Patch port configuration on JTCom switch
+- name: Create VLANs referenced by port configuration
   hosts: localhost
   connection: local
   gather_facts: false
@@ -10,18 +10,13 @@
     switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
   tasks:
-    - name: Set speed/duplex and enable/disable ports
+    - name: Create VLAN 61 when it is absent and use it for port 3
       bronweg.cgiswitch.jtcom_config:
         host: "{{ switch_host }}"
         username: "{{ switch_user }}"
         password: "{{ switch_pass }}"
+        # Without this option, an undeclared missing reference fails validation.
+        auto_create_referenced_vlans: true
         ports:
-          1:
-            admin_up: true
-            speed: Auto
-            flow_control: false
-          2:
-            admin_up: true
-            speed: 1000M/Full
           3:
-            admin_up: false
+            access_vlan: 61
