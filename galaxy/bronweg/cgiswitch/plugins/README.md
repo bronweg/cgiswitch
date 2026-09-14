@@ -4,7 +4,7 @@ This directory ships the plugins for the `bronweg.cgiswitch` Ansible
 collection. The collection's supported interface is Ansible: the
 `jtcom_config` action plugin runs in the controller process, uses
 `module_utils` to parse and validate input, and calls the `cgiswitch` Python
-library for the JTCom CGI interface. The core library does not use NAPALM.
+library for the JTCom CGI interface.
 
 The module stub in `modules/` provides argument, example, and return
 documentation for `ansible-doc`; execution is handled by the action plugin.

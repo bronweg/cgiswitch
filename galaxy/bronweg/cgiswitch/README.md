@@ -33,6 +33,15 @@ Run the build and install commands from the repository root. For a packaged
 release, install the matching `cgiswitch` package in the controller
 environment before installing the collection archive.
 
+## Connection scheme and TLS
+
+For a `host` without a scheme, `verify_tls: true` (the default) selects
+HTTPS on port 443; `verify_tls: false` selects HTTP on port 80. An explicit
+`http://` or `https://` in `host` determines the scheme directly, regardless
+of `verify_tls`. For HTTPS, `verify_tls` also controls certificate
+verification. For example, `host: https://192.0.2.1` with `verify_tls: false`
+uses HTTPS with certificate verification disabled.
+
 ## Modules
 
 ### `bronweg.cgiswitch.jtcom_config`
@@ -40,7 +49,7 @@ environment before installing the collection archive.
 Idempotent, diff-aware PATCH-style configuration of VLANs and ports. The
 collection runs in the controller process through an Ansible action plugin;
 the module utility parses and validates task input before the action plugin
-opens the switch connection. The core library does not use NAPALM.
+opens the switch connection.
 
 - **VLANs** support create, rename, delete, and membership add/remove/set
   operations. VLAN definitions not listed are left unchanged, although a
@@ -61,7 +70,7 @@ opens the switch connection. The core library does not use NAPALM.
 - Mapping keys may be integers or ASCII decimal strings; duplicate keys after
   normalization are rejected. Optional `null` values leave fields unchanged;
   empty lists apply the field's clear/set behavior.
-- Port 6 (management uplink) cannot be administratively disabled by default;
+- The safety port defaults to port 6 and cannot be administratively disabled;
   set `safety_port_id` to protect a different positive integer port ID
 - VLAN 1 cannot be deleted
 - Port-centric VLAN references must name an existing switch VLAN or a VLAN

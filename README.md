@@ -39,6 +39,18 @@ the core in the Ansible controller's Python environment, so this checkout's
 `cgiswitch` package must be installed there as well. The supported Ansible interface is
 `bronweg.cgiswitch.jtcom_config`.
 
+## Connection scheme and TLS
+
+For an Ansible `host` without a scheme, `verify_tls: true` (the default)
+selects HTTPS/443, while `verify_tls: false` selects HTTP/80. Explicit
+`http://` or `https://` in `host` sets the scheme directly. On HTTPS,
+`verify_tls` controls certificate verification: an explicit HTTPS URL with
+`verify_tls: false` still uses HTTPS, with verification disabled.
+
+The Python API has the same behavior through `hostname` and
+`JTComConnectionOptions.verify_tls`; `connection.port` can override the
+default port for a hostname without a scheme.
+
 ## What is supported
 
 The core provides these read operations:

@@ -21,7 +21,7 @@ description:
   - >-
     This action runs in the Ansible controller process. The collection parses
     and validates input with module utilities, then calls the cgiswitch Python
-    library directly; it does not use NAPALM.
+    library directly.
   - >-
     The JTCom backend uses the switch firmware's CGI interface. Applies have
     no transactional commit and no automatic rollback after a failed write.
@@ -43,7 +43,12 @@ options:
     type: str
     no_log: true
   verify_tls:
-    description: Verify TLS certificates when connecting over HTTPS.
+    description: >
+      Verify TLS certificates when connecting over HTTPS. For a host without
+      a scheme, true selects HTTPS on port 443 and false selects HTTP on port 80.
+      An explicit http:// or https:// in C(host) determines the scheme directly.
+      An explicit HTTPS host with false still uses HTTPS, with certificate
+      verification disabled.
     type: bool
     default: true
   backup_before_change:
