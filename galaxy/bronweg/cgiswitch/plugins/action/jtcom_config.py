@@ -32,6 +32,10 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             return dict(failed=True, changed=False, msg=str(exc))
 
         try:
+            from ansible_collections.bronweg.cgiswitch.plugins.module_utils.ansible_input import (
+                parse_desired_config,
+            )
+
             from cgiswitch.client.errors import (
                 JTComApplyError,
                 JTComError,
@@ -39,7 +43,6 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             )
             from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
             from cgiswitch.switch import JTComSwitch
-            from cgiswitch.utils.ansible_input import parse_desired_config
         except ImportError as exc:
             return dict(failed=True, msg=f"cgiswitch is not installed: {exc}")
 
@@ -53,7 +56,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
         )
         policy = ApplyPolicy(
             backup_before_change=p.get("backup_before_change", True),
-            safety_port_id=6,
+            safety_port_id=p.get("safety_port_id", 6),
             allow_port_mode_change=p.get("allow_port_mode_change", False),
             allow_untagged_move=p.get("allow_untagged_move", False),
             allow_vlan_delete_in_use=p.get("allow_vlan_delete_in_use", False),
@@ -116,7 +119,7 @@ def _validate_task_args(args: object) -> None:
         "verify_tls", "backup_before_change", "allow_port_mode_change",
         "allow_untagged_move", "allow_vlan_delete_in_use", "auto_create_referenced_vlans",
     }
-    allowed = flags | {"host", "username", "password", "vlans", "ports"}
+    allowed = flags | {"host", "username", "password", "vlans", "ports", "safety_port_id"}
     for key in args:
         if not isinstance(key, str) or key not in allowed:
             raise ValueError(f"Unknown task parameter: {key!r}")
@@ -127,3 +130,7 @@ def _validate_task_args(args: object) -> None:
     for key in sorted(flags):
         if key in args and not isinstance(args[key], bool):
             raise ValueError(f"Parameter '{key}' must be a boolean")
+
+    safety_port = args.get("safety_port_id", 6)
+    if isinstance(safety_port, bool) or not isinstance(safety_port, int) or safety_port < 1:
+        raise ValueError("Parameter 'safety_port_id' must be a positive integer")

@@ -64,7 +64,10 @@ def _action(module: types.ModuleType, args: dict[str, Any], check_mode: bool = F
     return instance
 
 
-def test_action_forwards_auto_create_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("check_mode", [False, True])
+def test_action_forwards_policy(
+    monkeypatch: pytest.MonkeyPatch, check_mode: bool,
+) -> None:
     module = _load_action()
     seen: list[ApplyPolicy] = []
 
@@ -90,10 +93,15 @@ def test_action_forwards_auto_create_policy(monkeypatch: pytest.MonkeyPatch) -> 
             }
 
     monkeypatch.setattr("cgiswitch.switch.JTComSwitch", FakeSwitch)
-    _action(module, {}).run()
-    _action(module, {"auto_create_referenced_vlans": True}).run()
+    _action(module, {}, check_mode=check_mode).run()
+    _action(module, {"safety_port_id": 9}, check_mode=check_mode).run()
+    _action(module, {"auto_create_referenced_vlans": True}, check_mode=check_mode).run()
 
-    assert seen == [ApplyPolicy(), ApplyPolicy(auto_create_referenced_vlans=True)]
+    assert seen == [
+        ApplyPolicy(safety_port_id=6),
+        ApplyPolicy(safety_port_id=9),
+        ApplyPolicy(safety_port_id=6, auto_create_referenced_vlans=True),
+    ]
 
 
 def test_action_returns_structured_blocked_check_result(

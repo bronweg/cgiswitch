@@ -761,7 +761,9 @@ def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
 
 
 def test_ansible_parser_preserves_missing_none_and_empty_list() -> None:
-    from cgiswitch.utils.ansible_input import parse_desired_config
+    from ansible_collections.bronweg.cgiswitch.plugins.module_utils.ansible_input import (
+        parse_desired_config,
+    )
 
     for entry in ({}, {"tagged_ports": None}):
         assert parse_desired_config({"vlans": {10: entry}}).vlans[10].tagged_ports is None

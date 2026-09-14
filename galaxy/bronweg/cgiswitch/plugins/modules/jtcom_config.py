@@ -68,6 +68,13 @@ options:
       Disabled by default; unknown references fail validation.
     type: bool
     default: false
+  safety_port_id:
+    description: >
+      Positive integer ID of the protected management port. Changes that would
+      administratively disable this port are blocked by policy.
+      Strings, booleans, and non-integer values are rejected without coercion.
+    type: int
+    default: 6
   vlans:
     description: >
       Incremental VLAN changes, keyed by VLAN ID. Map keys may be integers or
@@ -114,8 +121,8 @@ options:
       unknown access/native/add/set references. Remove references never create
       VLANs and fail when unknown.
       Set C(admin_up: false) to administratively disable a port.
-      Ports not listed are untouched. Port 6 (management uplink) cannot be
-      administratively disabled.
+      Ports not listed are untouched. The port selected by C(safety_port_id)
+      cannot be administratively disabled.
     type: dict
 notes:
   - "Run this module on the Ansible controller (C(connection: local))."
@@ -133,6 +140,8 @@ notes:
   - Untagged/native VLAN moves are blocked by default.
   - VLAN delete-in-use is blocked by default.
   - Access/trunk mode changes are blocked by default.
+  - The protected management port defaults to port 6 and can be changed with
+    C(safety_port_id).
   - If a changed port would otherwise have no VLAN membership, it is mapped to
     access VLAN 1 and a structured warning is returned.
 requirements:
@@ -239,15 +248,16 @@ EXAMPLES = r"""
       61:
         tagged_add: [1, 2, 3, 4, 5]
 
-- name: Inspect a blocked safety-port check-mode plan
+- name: Inspect a blocked plan with a custom safety port
   check_mode: true
   bronweg.cgiswitch.jtcom_config:
     host: 192.0.2.1
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
+    safety_port_id: 5
     ports:
-      6:
+      5:
         admin_up: false
   register: jtcom_preview
 
@@ -392,6 +402,7 @@ def main() -> None:
             allow_untagged_move=dict(type="bool", default=False),
             allow_vlan_delete_in_use=dict(type="bool", default=False),
             auto_create_referenced_vlans=dict(type="bool", default=False),
+            safety_port_id=dict(type="int", default=6),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),
