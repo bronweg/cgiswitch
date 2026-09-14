@@ -208,6 +208,16 @@ The baseline must be from the same device MAC and must show that every declared
 disposable VLAN was absent. Both selected ports must be in the baseline and
 current inventory. The helper rejects a disposable VLAN currently used by
 another port and rejects out-of-scope desired fields and preview operations.
+For `--execute`, the test port must have no non-disposable tagged VLANs and
+exactly one untagged/native VLAN: VLAN 1 or a declared disposable VLAN. The
+initial baseline must therefore show a clean port with untagged VLAN 1 and
+no tags, since disposable VLANs must be absent there. Missing or multiple
+untagged memberships also fail closed. These checks apply to the baseline,
+current snapshot, and fresh snapshots before both live apply calls, so an
+access intent cannot silently clear unrelated existing tags. Prepare the
+isolated lab port manually before capturing the baseline if needed; there is
+no bypass flag. Check-only mode can still capture an unsafe port's preview.
+
 This cannot establish which physical link carries management or production:
 operator isolation and recovery confirmations are essential, not proof supplied
 by the script. Do not run concurrent UI or automation writers. Each apply reads
@@ -216,7 +226,11 @@ fresh state; a preview is not a reservation or a transaction.
 The three confirmation flags attest to checks the operator already performed.
 They do not perform a restore or prove recovery. `run.json` deliberately keeps
 hardware validation status `INCOMPLETE`, even when the command succeeds.
-`failure.json` preserves core apply context when available. Stop after any
+`failure.json` preserves core apply context when available. Errors before this
+run creates an evidence directory are printed directly with credential and
+control-character sanitization. Later failures direct the operator to private
+evidence. An already existing output directory is rejected and is not treated
+as evidence created by this run. Stop after any
 failure; there is no automatic cleanup or rollback. Recover with the reviewed
 manual procedure, then capture and compare the resulting state.
 

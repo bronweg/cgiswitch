@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import asdict
@@ -154,6 +155,23 @@ def check_preview(preview: dict[str, Any], args: argparse.Namespace) -> None:
             raise ValueError('Preview operation escaped declared scope')
 
 
+def check_test_membership(observed: dict[str, Any], args: argparse.Namespace) -> None:
+    """Allow only disposable tags and one default/disposable native VLAN for live tests."""
+    port = f'Port {args.test_port}'
+    tagged: set[int] = set()
+    untagged: set[int] = set()
+    for key, vlan in observed['vlans'].items():
+        if port in vlan['tagged_ports']:
+            tagged.add(int(key))
+        if port in vlan['untagged_ports']:
+            untagged.add(int(key))
+    disposable = set(args.vlan_ids)
+    if tagged - disposable:
+        raise ValueError('Test port has non-disposable tagged membership; live test refused')
+    if len(untagged) != 1 or not untagged <= disposable | {1}:
+        raise ValueError('Unexpected or unknown test-port untagged/native VLAN; live test refused')
+
+
 def check_baseline(
     baseline: dict[str, Any], observed: dict[str, Any], args: argparse.Namespace,
 ) -> None:
@@ -167,6 +185,9 @@ def check_baseline(
         known = {port['port_id'] for port in state['ports']}
         if not {args.test_port, args.management_port} <= known:
             raise ValueError('Test and management ports must exist in both snapshots')
+    if args.execute:
+        check_test_membership(baseline, args)
+        check_test_membership(observed, args)
     for vid in args.vlan_ids:
         vlan = observed['vlans'].get(str(vid))
         if vlan is not None:
@@ -176,6 +197,7 @@ def check_baseline(
 
 
 def run(args: argparse.Namespace) -> None:
+    args.evidence_created = False
     validate_scope(args)
     desired = None
     if args.mode == 'apply':
@@ -185,6 +207,7 @@ def run(args: argparse.Namespace) -> None:
     if not username or not password:
         raise ValueError('Credentials must not be empty')
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    args.evidence_created = True
     revision = subprocess.run(
         ['git', '-C', str(Path(__file__).resolve().parents[1]), 'rev-parse', 'HEAD'],
         capture_output=True, text=True, check=False,
@@ -247,6 +270,9 @@ def run(args: argparse.Namespace) -> None:
             check_preview(preview, args)
             if not args.execute:
                 return
+            live_state = snapshot(switch)
+            save(args.output, 'pre-apply.json', live_state)
+            check_test_membership(live_state, args)
             result = switch.apply(desired)
             save(args.output, 'apply.json', result)
             save(args.output, 'after.json', snapshot(switch))
@@ -254,6 +280,9 @@ def run(args: argparse.Namespace) -> None:
             save(args.output, 'repeat-preview.json', repeated_preview)
             if repeated_preview['changed'] or repeated_preview['blocked']:
                 raise ValueError('Repeat preview is not an unblocked no-op; stopping')
+            repeat_state = snapshot(switch)
+            save(args.output, 'pre-repeat-apply.json', repeat_state)
+            check_test_membership(repeat_state, args)
             repeated = switch.apply(desired)
             save(args.output, 'repeat-apply.json', repeated)
             if repeated['changed'] or repeated['applied'] or repeated['backup_file']:
@@ -266,12 +295,28 @@ def run(args: argparse.Namespace) -> None:
         raise
 
 
+def sanitized_error(exc: Exception) -> str:
+    """Remove environment credentials and control characters from early diagnostics."""
+    message = str(exc)
+    for key in ('JTCOM_USERNAME', 'JTCOM_PASSWORD'):
+        secret = os.environ.get(key)
+        if secret:
+            message = message.replace(secret, '[redacted]')
+            message = message.replace(repr(secret)[1:-1], '[redacted]')
+    message = re.sub(r'(https?://)[^/\s]*@', r'\1[redacted]@', message)
+    message = ''.join(char if char.isprintable() else ' ' for char in message)
+    return f'{type(exc).__name__}: {message}'
+
+
 def main() -> None:
     args = arguments().parse_args()
     try:
         run(args)
     except Exception as exc:
-        message = f'{type(exc).__name__}: stopped; inspect private evidence directory'
+        if getattr(args, 'evidence_created', False):
+            message = f'{type(exc).__name__}: stopped; inspect private evidence directory'
+        else:
+            message = sanitized_error(exc)
         raise SystemExit(message) from None
     print('Evidence captured. Hardware validation remains incomplete until operator sign-off.')
 

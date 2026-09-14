@@ -58,7 +58,8 @@ def test_desired_scope_rejection(tmp_path: Path, desired: dict) -> None:
 def state() -> dict:
     return {
         'device': {'mac_address': '00:11:22:33:44:55'},
-        'ports': [{'port_id': 2}, {'port_id': 6}], 'vlans': {},
+        'ports': [{'port_id': 2}, {'port_id': 6}],
+        'vlans': {'1': {'tagged_ports': [], 'untagged_ports': ['Port 2']}},
     }
 
 
@@ -196,3 +197,102 @@ def test_blocked_preview_never_applies(tmp_path: Path, monkeypatch: pytest.Monke
         runner.run(execute_args(tmp_path))
     assert switch.apply.call_count == 1
     assert switch.apply.call_args.kwargs == {'check_mode': True}
+
+
+def unsafe_state(kind: str) -> dict:
+    observed = state()
+    if kind == 'tagged':
+        observed['vlans']['20'] = {'tagged_ports': ['Port 2'], 'untagged_ports': []}
+    elif kind == 'native':
+        observed['vlans'] = {'20': {'tagged_ports': [], 'untagged_ports': ['Port 2']}}
+    elif kind == 'missing':
+        observed['vlans'] = {}
+    else:
+        observed['vlans']['3000'] = {'tagged_ports': [], 'untagged_ports': ['Port 2']}
+    return observed
+
+
+@pytest.mark.parametrize('kind', ['tagged', 'native', 'missing', 'multiple'])
+@pytest.mark.parametrize('source', ['baseline', 'current', 'pre_apply'])
+def test_unsafe_membership_stops_before_backup_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, source: str,
+) -> None:
+    switch = prepare(tmp_path, monkeypatch)
+    switch.apply.return_value = preview()
+    unsafe = unsafe_state(kind)
+    if source == 'baseline':
+        (tmp_path / 'baseline.json').write_text(json.dumps(unsafe))
+    elif source == 'current':
+        monkeypatch.setattr(runner, 'snapshot', lambda _: unsafe)
+    else:
+        snapshots = iter([state(), unsafe])
+        monkeypatch.setattr(runner, 'snapshot', lambda _: next(snapshots))
+    with pytest.raises(ValueError):
+        runner.run(execute_args(tmp_path))
+    assert all(call.kwargs == {'check_mode': True} for call in switch.apply.call_args_list)
+    assert not (tmp_path / 'evidence/backups').exists()
+    assert not (tmp_path / 'evidence/apply.json').exists()
+
+
+def test_clean_disposable_membership_is_allowed(tmp_path: Path) -> None:
+    observed = state()
+    observed['vlans'] = {
+        '3000': {'tagged_ports': [], 'untagged_ports': ['Port 2']},
+        '3001': {'tagged_ports': ['Port 2'], 'untagged_ports': []},
+    }
+    args = arguments(tmp_path)
+    args.vlan_ids = [3000, 3001]
+    runner.check_test_membership(observed, args)
+
+
+@pytest.mark.parametrize('existing_directory', [False, True])
+def test_early_error_is_direct_even_if_output_preexists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_directory: bool,
+) -> None:
+    args = arguments(tmp_path)
+    if existing_directory:
+        args.output.mkdir()
+        # Valid scope/input allows execution to reach mkdir, which must refuse reuse.
+        prepare(tmp_path, monkeypatch)
+    else:
+        args.test_port = args.management_port
+    monkeypatch.setattr(runner, 'arguments', lambda: MagicMock(parse_args=lambda: args))
+    with pytest.raises(SystemExit) as captured:
+        runner.main()
+    message = str(captured.value)
+    assert 'inspect private evidence directory' not in message
+    assert ('FileExistsError' if existing_directory else 'management port') in message
+
+
+def test_early_error_sanitizes_credentials_and_control_characters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = arguments(tmp_path)
+    monkeypatch.setenv('JTCOM_PASSWORD', 'private-password')
+    monkeypatch.setattr(runner, 'arguments', lambda: MagicMock(parse_args=lambda: args))
+
+    def fail(_: object) -> None:
+        raise ValueError('bad private-password https://user:other-secret@host\ninput\x1b')
+
+    monkeypatch.setattr(runner, 'run', fail)
+    with pytest.raises(SystemExit) as captured:
+        runner.main()
+    message = str(captured.value)
+    assert 'private-password' not in message
+    assert 'other-secret' not in message
+    assert '\n' not in message and '\x1b' not in message
+    assert 'ValueError: bad' in message
+
+
+def test_error_after_evidence_creation_uses_private_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    switch = prepare(tmp_path, monkeypatch)
+    switch.apply.side_effect = ValueError('private device detail')
+    args = arguments(tmp_path)
+    monkeypatch.setattr(runner, 'arguments', lambda: MagicMock(parse_args=lambda: args))
+    with pytest.raises(SystemExit) as captured:
+        runner.main()
+    assert 'inspect private evidence directory' in str(captured.value)
+    assert 'private device detail' not in str(captured.value)
+    assert (args.output / 'failure.json').exists()
