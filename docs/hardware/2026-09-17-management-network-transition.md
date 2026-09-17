@@ -1,9 +1,8 @@
 # Management network transition validation
 
-Status: controlled transition **PASS**; automatic persistence **DISPROVEN**.
-One separately authorized reboot was performed without save configuration.
-The save-plus-reboot persistence experiment remains pending authorization.
-PR-11 is not hardware-complete until that experiment is finished.
+Status: controlled transition **PASS**; automatic persistence **DISPROVEN**;
+persistence after explicit save **PASS**. Two authorized reboot experiments
+established the required save behavior on this firmware.
 
 Firmware: V100SP11240725 on the operator-provided ONT-S207CW-62TS-SE.
 Identity was compared by MAC and serial against the earlier private baseline.
@@ -76,9 +75,27 @@ Evidence for this experiment is in the private sibling directory
 `pr11-network-persistence/`, including before/after state, reboot response
 failure type, endpoint observations, and the configuration POST trace.
 
-The IP update does not persist automatically on this firmware. A follow-up
-experiment must apply the temporary IP, call the confirmed `saveconfig`, reboot,
-and verify exact state and identity. It requires another explicit reboot
-approval. Until then, save-plus-reboot persistence is not claimed and PR-11
-remains draft. The bootstrap persistence policy must reflect the completed
-hardware experiments rather than assuming that a successful IP POST is durable.
+The IP update does not persist automatically on this firmware.
+
+## Save then reboot: persistence confirmed
+
+With further operator authorization, the same temporary IP was applied and
+verified, followed by one confirmed `saveconfig` and one reboot POST. After
+reconnect, the same MAC/serial remained at the temporary address with exact
+requested network state. Thus an explicit save is required for durable
+management IP changes on V100SP11240725.
+
+The original management address was then restored by an explicit transition
+and saved. A final read confirmed the original management and full port/VLAN
+baseline. No extra reboot was needed for cleanup. The original address after
+this final save was not independently reboot-tested; save persistence had just
+been proven using the temporary address.
+
+Private evidence: `pr11-network-persistence-saved/` alongside the other runs,
+including target save, reboot observations, exact state, restoration, and final
+save. Production values, HomeLab inventory, and SOPS were not involved.
+
+The future bootstrap workflow must save verified management changes at the
+reached endpoint. The low-level transition itself deliberately does not infer
+persistence or automatically reboot. Repeated already-desired transition
+remains a no-op with no configuration POST.
