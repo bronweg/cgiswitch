@@ -244,6 +244,11 @@ class JTComSession:
     # Internals
     # ------------------------------------------------------------------
 
+    def _discard(self) -> None:
+        """Close local transport without contacting a possibly changed endpoint."""
+        self._logged_in = False
+        self._http.close()
+
     def _do_post(
         self,
         path: str,
