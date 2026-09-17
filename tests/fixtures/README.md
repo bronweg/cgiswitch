@@ -31,3 +31,19 @@ real hardware is still pending.
 The `malformed_vlan_*.html` files are synthetic invalid responses for VLAN ID,
 access VLAN, native VLAN, permit list, and mode parsing regression tests. They
 must be rejected rather than converted to missing or empty configuration.
+
+## Management-plane source fixtures
+
+`management_ip.html`, `user_account.html`, `system_management.html`, and
+`management_form_helpers.js` originate from authenticated live GETs on firmware
+V100SP11240725 (2026-09-17). Network addresses were replaced with RFC 5737
+fixture addresses; no MAC, serial, cookie, session ID, or password value is
+included. User fields were blank on the device. The IP/user form structure and
+JavaScript are preserved. System and shared helper fixtures contain only the
+relevant extracted functions, omitting unrelated device controls/assets.
+
+These fixtures prove UI field names and serialization, not successful network
+or password mutation. Save configuration was independently confirmed by live
+POST with `{"code":0,"data":""}`. Reboot and IP/password mutations remain
+untested at this discovery stage. See the management discovery report for
+confidence levels and observed UI constraints.

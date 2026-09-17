@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import requests
@@ -40,7 +40,7 @@ class JTComCredentials:
     """
 
     username: str
-    password: str
+    password: str = field(repr=False)
 
 
 class JTComSession:
@@ -260,6 +260,29 @@ class JTComSession:
                 form_dict.update(data)
             form = form_dict
         return self._http.post_form(path, data=form)
+
+    def _post_once(self, path: str, data: dict[str, str]) -> None:
+        """Send an internal management command once; never replay its POST.
+
+        Only the observed empty-data success envelope is accepted. Response
+        data is deliberately excluded from errors because it can echo secrets.
+        """
+        self.ensure_session()
+        response = self._do_post(path, data)
+        if _is_auth_expired(response):
+            self._logged_in = False
+            raise JTComAuthError("Management command authentication expired")
+        if response.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
+            raise JTComParseError("Unexpected management command response type")
+        result = self._parse_json(response.text, path)
+        if set(result) != {"code", "data"} or not isinstance(result["data"], str):
+            raise JTComParseError("Unexpected management command response envelope")
+        if result["code"] != CODE_OK:
+            raise JTComSwitchError(
+                code=int(str(result["code"])), message="Management command rejected", endpoint=path,
+            )
+        if result["data"] != "":
+            raise JTComParseError("Unexpected management command success data")
 
     def _authenticated_request(
         self, path: str, send: Callable[[], requests.Response],

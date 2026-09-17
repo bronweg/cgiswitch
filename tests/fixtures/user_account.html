@@ -1,0 +1,51 @@
+<div class="sys-info">
+<h2 class="sub-title">User Account Setting</h2>
+<form method="post" id="userForm" name="userForm" action="user.cgi" targetFrame="targetFrame" autocomplete="off">  <table class="sw-table stripe center">    <tbody>      <tr>
+        <td><b>Account</b></td>
+        <td class="tl"><input type="text" name="mname" maxlength="16" placeholder="Account"></td>
+      </tr>
+      <tr>
+        <td><b>Password</b></td>
+        <td class="tl">
+          <input type="password" name="mpass" maxlength="20" placeholder="Password">
+          <span class="c-warning"> The password must contain only letters, numbers and the following special characters: <=>[]!@#$*().</span>
+        </td>
+      </tr>
+      <tr>
+        <td><b>Confirm Password</b></td>
+        <td class="tl"><input type="password" name="mpass2" maxlength="20" placeholder="Confirm Password"></td>
+      </tr>
+    </tbody>  </table>  <div class="form-tool">    <input type="button" value="Apply" onclick="userConfirm()">  </div></form>
+<br>
+<br>
+<script>
+function userConfirm(){
+  var _form = document.userForm;
+  var _cname = _form.mname.value;
+  var _cpass = _form.mpass.value;
+  var _cpass2 = _form.mpass2.value;
+  if ((_cname.length < 5) || (_cname.length > 16) || !vaildate_username(_cname)){
+      alert("Username must consist of letters, numbers, underscores and must be 5-16 characters long!");
+      return;
+  }
+  if (_cpass.length<6||_cpass.length>16){
+      alert("The password must contain 6-16 characters!");
+      return;
+  }
+  if (!/^[0-9a-zA-Z<=>\[\]!@#$*\(\)\.]+$/.test(_cpass)){
+      alert("The password must contain only letters, numbers and the following special characters: <=>[]!@#$*().");
+      return;
+  }
+  if (_cpass2!==_cpass){
+      alert("The passwords do not match!");
+      return;
+  }
+  var _tip='After you change the account, re-login is required. Do you want to continue?';
+  if(confirm(_tip)){
+      showBg();
+      httpPostGet("POST","user.cgi",serializeForm("userForm"),function(val){
+      if(0==val.code){refreshWeb();};},1);
+  }
+};
+</script>
+</div>

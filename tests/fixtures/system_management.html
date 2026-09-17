@@ -1,0 +1,4 @@
+<script>
+function RebootConfirm() {      if (confirm('Are you sure you want to reboot the switch?')) {          showBg('Rebooting......');stopPanleTime();          httpPostGet("POST","syscmd.cgi","cmd=reboot",'',1);setTimeout("refreshWeb()",3000);        }      };
+function SaveConfig() {          showBg('Saving......');          httpPostGet("POST","syscmd.cgi","cmd=saveconfig", function(resp){alert('Saved successfully.');reCurrentWeb();},1);      };
+</script>
