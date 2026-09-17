@@ -243,7 +243,8 @@ ansible-doc bronweg.cgiswitch.jtcom_config
 The [hardware checklist](docs/HARDWARE_VALIDATION.md) and
 [evidence template](docs/hardware/RESULTS_TEMPLATE.md) describe the pending
 real-device validation. Preparation scripts and mocked tests do not complete
-that stage. No hardware result is claimed by this checkout.
+that stage. A [read-only result](docs/hardware/2026-09-17-ONT-S207CW-62TS-SE-readonly.md)
+is recorded for one device/firmware; restore and write validation remain pending.
 
 ## Development
 
