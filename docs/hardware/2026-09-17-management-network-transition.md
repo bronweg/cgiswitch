@@ -1,8 +1,9 @@
 # Management network transition validation
 
-Status: controlled transition **PASS**; reboot persistence **NOT TESTED**.
-PR-11 is not hardware-complete until persistence is established with separately
-authorized reboot. No reboot or save command was used in this run.
+Status: controlled transition **PASS**; automatic persistence **DISPROVEN**.
+One separately authorized reboot was performed without save configuration.
+The save-plus-reboot persistence experiment remains pending authorization.
+PR-11 is not hardware-complete until that experiment is finished.
 
 Firmware: V100SP11240725 on the operator-provided ONT-S207CW-62TS-SE.
 Identity was compared by MAC and serial against the earlier private baseline.
@@ -60,6 +61,24 @@ under ignored `hardware-evidence/`. It contains source hashes, original/final
 snapshots, transition/repeat/restoration results, and the two configuration POST
 records. No passwords or production values are committed.
 
-Persistence must be determined by changing to the temporary target, rebooting
-without an inferred save policy, and identifying the device at the possible
-endpoints. No persistence rule has yet been chosen for the future orchestrator.
+## Reboot without save: observed loss of management change
+
+The temporary IP was applied and verified again. Exactly one `cmd=reboot`
+POST was sent to `/syscmd.cgi`; the response was lost at transport level. The
+request was not repeated. Subsequent endpoint probes found the same MAC/serial
+at the original factory address, with the exact original address/mask/gateway.
+The temporary target did not respond. Uptime fell from over eleven hours to
+five seconds, confirming the reboot independently of the missing response.
+
+A final read confirmed the original network state and full port/VLAN baseline.
+No password change, restore, or controller network change was performed.
+Evidence for this experiment is in the private sibling directory
+`pr11-network-persistence/`, including before/after state, reboot response
+failure type, endpoint observations, and the configuration POST trace.
+
+The IP update does not persist automatically on this firmware. A follow-up
+experiment must apply the temporary IP, call the confirmed `saveconfig`, reboot,
+and verify exact state and identity. It requires another explicit reboot
+approval. Until then, save-plus-reboot persistence is not claimed and PR-11
+remains draft. The bootstrap persistence policy must reflect the completed
+hardware experiments rather than assuming that a successful IP POST is durable.
