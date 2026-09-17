@@ -2,8 +2,8 @@
 
 `cgiswitch` is a typed Python client and Ansible collection for JTCom L2
 Ethernet switches that expose an HTTP CGI web interface. The project is Alpha
-software; fixture-backed tests are available, while validation on real
-hardware is still pending.
+software; fixture-backed tests and controlled hardware validation are available
+for one device/firmware. Backup restore and session-expiry validation remain pending.
 
 The apply path takes a backup before changes by default, verifies the result by
 reading the switch again, and does not attempt automatic rollback. It does not
@@ -241,10 +241,13 @@ ansible-doc bronweg.cgiswitch.jtcom_config
 ## Hardware validation
 
 The [hardware checklist](docs/HARDWARE_VALIDATION.md) and
-[evidence template](docs/hardware/RESULTS_TEMPLATE.md) describe the pending
-real-device validation. Preparation scripts and mocked tests do not complete
-that stage. A [read-only result](docs/hardware/2026-09-17-ONT-S207CW-62TS-SE-readonly.md)
-is recorded for one device/firmware; restore and write validation remain pending.
+[evidence template](docs/hardware/RESULTS_TEMPLATE.md) track real-device
+validation. [Read-only results](docs/hardware/2026-09-17-ONT-S207CW-62TS-SE-readonly.md)
+and [controlled write results](docs/hardware/2026-09-17-controlled-live.md) are
+recorded for ONT-S207CW-62TS-SE firmware V100SP11240725, including VLAN/port
+changes, repeated real apply as a no-op, and restoration of the original
+port/VLAN configuration. Manual backup restore, session expiry, and traffic
+forwarding/link negotiation on the isolated test port remain unvalidated.
 
 ## Development
 

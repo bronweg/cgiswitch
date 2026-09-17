@@ -132,6 +132,33 @@ def test_success_repeats_apply_as_noop(tmp_path: Path, monkeypatch: pytest.Monke
     assert (tmp_path / 'evidence/repeat-apply.json').exists()
 
 
+@pytest.mark.parametrize('before_repeat', [False, True])
+@pytest.mark.parametrize('membership', ['tagged_ports', 'untagged_ports'])
+def test_disposable_vlan_shared_after_preview_blocks_real_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before_repeat: bool, membership: str,
+) -> None:
+    switch = prepare(tmp_path, monkeypatch)
+    shared = state()
+    shared['vlans']['3000'] = {'tagged_ports': [], 'untagged_ports': []}
+    shared['vlans']['3000'][membership] = ['Port 6']
+    snapshots = [state(), state(), state(), shared] if before_repeat else [state(), shared]
+    monkeypatch.setattr(runner, 'snapshot', MagicMock(side_effect=snapshots))
+    switch.apply.side_effect = [preview(), preview(), preview(False)]
+
+    with pytest.raises(ValueError, match='Disposable VLAN is now used by another port'):
+        runner.run(execute_args(tmp_path))
+
+    expected_calls = [{'check_mode': True}, {}, {'check_mode': True}] if before_repeat else [
+        {'check_mode': True},
+    ]
+    assert [call.kwargs for call in switch.apply.call_args_list] == expected_calls
+    assert not (tmp_path / 'evidence/repeat-apply.json').exists()
+    if not before_repeat:
+        assert not (tmp_path / 'evidence/apply.json').exists()
+        assert not (tmp_path / 'evidence/backups').exists()
+    assert (tmp_path / 'evidence/failure.json').exists()
+
+
 def test_non_idempotent_preview_stops_before_second_apply(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

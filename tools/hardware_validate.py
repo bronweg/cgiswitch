@@ -272,7 +272,7 @@ def run(args: argparse.Namespace) -> None:
                 return
             live_state = snapshot(switch)
             save(args.output, 'pre-apply.json', live_state)
-            check_test_membership(live_state, args)
+            check_baseline(baseline, live_state, args)
             result = switch.apply(desired)
             save(args.output, 'apply.json', result)
             save(args.output, 'after.json', snapshot(switch))
@@ -282,7 +282,7 @@ def run(args: argparse.Namespace) -> None:
                 raise ValueError('Repeat preview is not an unblocked no-op; stopping')
             repeat_state = snapshot(switch)
             save(args.output, 'pre-repeat-apply.json', repeat_state)
-            check_test_membership(repeat_state, args)
+            check_baseline(baseline, repeat_state, args)
             repeated = switch.apply(desired)
             save(args.output, 'repeat-apply.json', repeated)
             if repeated['changed'] or repeated['applied'] or repeated['backup_file']:
