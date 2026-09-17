@@ -62,3 +62,14 @@ def test_credentials_repr_and_command_errors_do_not_echo_secret() -> None:
         save_config(session)
     assert secret not in str(caught.value)
     assert caught.value.payload is None
+
+
+def test_save_http_auth_expiry_does_not_relogin_or_repeat() -> None:
+    from cgiswitch.client.errors import JTComResponseError
+
+    session = session_with_response('')
+    session._http.post_form.side_effect = JTComResponseError(401, 'http://192.0.2.1/syscmd.cgi')
+    with pytest.raises(JTComAuthError):
+        save_config(session)
+    assert session._http.post_form.call_count == 1
+    assert session.logged_in is False

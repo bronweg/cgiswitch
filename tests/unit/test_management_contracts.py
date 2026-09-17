@@ -81,3 +81,8 @@ def test_payload_fields_match_captured_named_controls() -> None:
     helpers = (fixtures / 'management_form_helpers.js').read_text()
     assert "data=params+'&page=inside'" in helpers
     assert 'encodeURIComponent(values[i])' in helpers
+
+
+def test_management_gateway_must_match_observed_ui_subnet_rule() -> None:
+    with pytest.raises(ValueError, match='subnet'):
+        build_management_network_payload('192.0.2.10', '255.255.255.0', '198.51.100.1')

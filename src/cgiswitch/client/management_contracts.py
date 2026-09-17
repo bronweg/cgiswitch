@@ -39,11 +39,17 @@ def build_management_network_payload(
     gateway: str,
 ) -> dict[str, str]:
     """Build the static management network form payload."""
+    address = _ipv4(ip, "ip")
+    mask = _netmask(netmask)
+    route = _ipv4(gateway, "gateway")
+    network = ipaddress.IPv4Network(f"{address}/{mask}", strict=False)
+    if ipaddress.IPv4Address(route) not in network:
+        raise ValueError("gateway must be in the management address subnet")
     return {
         "dhcp_state": "0",
-        "ip": _ipv4(ip, "ip"),
-        "netmask": _netmask(netmask),
-        "gateway": _ipv4(gateway, "gateway"),
+        "ip": address,
+        "netmask": mask,
+        "gateway": route,
         "cmd": "ip",
         "page": "inside",
     }

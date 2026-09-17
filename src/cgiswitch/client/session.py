@@ -268,7 +268,13 @@ class JTComSession:
         data is deliberately excluded from errors because it can echo secrets.
         """
         self.ensure_session()
-        response = self._do_post(path, data)
+        try:
+            response = self._do_post(path, data)
+        except JTComResponseError as exc:
+            if exc.status_code != 401:
+                raise
+            self._logged_in = False
+            raise JTComAuthError("Management command authentication expired") from None
         if _is_auth_expired(response):
             self._logged_in = False
             raise JTComAuthError("Management command authentication expired")
