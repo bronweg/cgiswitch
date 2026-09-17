@@ -1,0 +1,98 @@
+<div>
+<h2 class="sub-title">IP Address Setting</h2>
+<script type="text/javascript">
+  function chkEnable(value)
+  {
+    if ( value == '0' ) {
+      document.getElementById('ip').value = '192.0.2.10';
+      document.getElementById('ip').disabled = false;
+      document.getElementById('netmask').value = '255.255.255.0';
+      document.getElementById('netmask').disabled = false;
+      document.getElementById('gateway').value = '192.0.2.254';
+      document.getElementById('gateway').disabled = false;
+    }
+    else {
+      document.getElementById('ip').value = '192.0.2.10';
+      document.getElementById('ip').disabled = true;
+      document.getElementById('netmask').value = '255.255.255.0';
+      document.getElementById('netmask').disabled = true;
+      document.getElementById('gateway').value = '192.0.2.254';
+      document.getElementById('gateway').disabled = true;
+    }
+  }
+  ValideIPAndMaskAndDefaultGatWay = (IP, Mask, DefaultGatWay) => {
+    var IPkArr = IP.split('.');
+    var MaskkArr = Mask.split('.');
+    var DefaultGatWaykArr = DefaultGatWay.split('.');
+    var v_eth1ip = (parseInt(IPkArr[0], 10) << 24) | (parseInt(IPkArr[1], 10) << 16) | (parseInt(IPkArr[2], 10) << 8) | (parseInt(IPkArr[3], 10));
+    var v_eth1msk = (parseInt(MaskkArr[0], 10) << 24) | (parseInt(MaskkArr[1], 10) << 16) | (parseInt(MaskkArr[2], 10) << 8) | (parseInt(MaskkArr[3], 10));
+    var v_gwip = (parseInt(DefaultGatWaykArr[0], 10) << 24) | (parseInt(DefaultGatWaykArr[1], 10) << 16) | (parseInt(DefaultGatWaykArr[2], 10) << 8) | (parseInt(DefaultGatWaykArr[3], 10));
+    var net_eth1 = v_eth1ip & v_eth1msk;
+    var net_gweth1 = v_gwip & v_eth1msk;
+    if (net_eth1 != net_gweth1) {
+      return false;
+    }
+    return true;
+  };
+  function ConfirmBox() {
+    var _dhcp=getInVal('dhcp_state');
+    if ( _dhcp == '0' ) {
+      var _ip=getInVal('ip');
+      var _netmask=getInVal('netmask');
+      var _gateway=getInVal('gateway');
+      if(!checkIpValid(_ip)){
+        alert('Invalid IP Address!');
+        return false;
+      }
+      if(!checkIpValid(_netmask)){
+        alert('Invalid Netmask!');
+        return false;
+      }
+      if(!checkIpValid(_gateway)){
+        alert('Invalid Gateway!');
+        return false;
+      }
+      if(!ValideIPAndMaskAndDefaultGatWay(_ip,_netmask,_gateway)){
+        alert('Invalid Gateway!');
+        return false;
+      }
+    }
+    if (confirm('Change IP address will lose connection, continue?')) {
+      showBg();
+      httpPostGet("POST", "ip.cgi", serializeForm('ip_form'), function(val){
+      if(0==val.code)reCurrentWeb();else {closeBg();alert(val.data);}    },1);    } else {
+        return false;
+    }
+}
+chkEnable(0);
+</script>
+<form method="post" name="ip_form" id="ip_form" action="ip.cgi">
+  <table class="sw-table stripe center">
+    <tr>
+      <td><b>DHCP Setting</b></td>
+      <td class="tl">
+        <select name="dhcp_state" id="dhcp_state" onchange="chkEnable(this.value)">
+          <option value="0" selected>Disable
+          <option value="1" >Enable
+        </select>
+      </td>
+    </tr>
+    <tr>
+      <td><b>IP Address</b></td>
+      <td class="tl"><input type="text" size="16" name="ip" id="ip" value="192.0.2.10" maxlength="15"></td>
+    </tr>
+    <tr>
+      <td><b>Subnet Mask</b></td>
+      <td class="tl"><input type="text" size="16" name="netmask" id="netmask" value="255.255.255.0" maxlength="15"></td>
+    </tr>
+    <tr>
+      <td><b>Gateway</b></td>
+      <td class="tl"><input type="text" size="16" name="gateway" id="gateway" value="192.0.2.254" maxlength="15"></td>
+    </tr>
+  </table>
+  <div class="form-tool">
+    <input type="button" value="Apply" onclick="ConfirmBox()">
+    <input type="hidden" name="cmd" value="ip">
+  </div>
+</form>
+</div>

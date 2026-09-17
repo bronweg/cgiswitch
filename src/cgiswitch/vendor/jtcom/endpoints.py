@@ -15,6 +15,9 @@ LOGOUT: str = SYSCMD
 
 # Device / system
 DEVICE_INFO: str = "/info.cgi"
+MANAGEMENT_NETWORK: str = "/ip.cgi"
+USER_ACCOUNT: str = "/user.cgi"
+DEVICE_MANAGEMENT: str = "/dev.cgi"
 
 # Port management
 PORT_SETTINGS: str = "/port.cgi"
@@ -34,4 +37,3 @@ VLAN_PORT_SET: str = "/vlanport.cgi"          # POST: per-port VLAN membership
 
 # Configuration backup
 CONFIG_BACKUP: str = "/config.cgi"            # GET ?cmd=conf_backup → raw binary
-
