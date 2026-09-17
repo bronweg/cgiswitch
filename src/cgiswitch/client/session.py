@@ -104,8 +104,7 @@ class JTComSession:
         if result["code"] != CODE_OK:
             self._logged_in = False
             raise JTComAuthError(
-                f"Login rejected by switch: code={result['code']!r} "
-                f"data={result.get('data')!r}"
+                f"Login rejected by switch: code={result['code']!r}"
             )
         self._logged_in = True
         logger.debug("Logged in to %s", self._http.base_url)
