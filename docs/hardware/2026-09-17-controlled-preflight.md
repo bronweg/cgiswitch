@@ -1,5 +1,7 @@
 # Controlled hardware preflight: paused before preview or writes
 
+Historical attempt; subsequently continued in the [controlled live run](2026-09-17-controlled-live.md).
+
 Status: **INCOMPLETE**. No configuration writes were made. The attempted
 check-only sequence stopped at its baseline consistency assertion before
 calling `apply()`. PR-09 remains draft.
