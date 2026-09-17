@@ -25,6 +25,26 @@ def _parse_vlan_id(raw: str, *, field: str, context: str) -> int:
     return vlan_id
 
 
+def _parse_permit_vlan_token(raw: str, *, context: str) -> list[int]:
+    """Parse one permit VLAN ID or inclusive VLAN range."""
+    range_match = re.fullmatch(r"([0-9]+)\s*-\s*([0-9]+)", raw)
+    if range_match is None:
+        return [_parse_vlan_id(raw, field="permit_vlans", context=context)]
+
+    start = _parse_vlan_id(
+        range_match.group(1), field="permit_vlans", context=context
+    )
+    end = _parse_vlan_id(
+        range_match.group(2), field="permit_vlans", context=context
+    )
+    if start > end:
+        raise JTComParseError(
+            f"{context} field='permit_vlans' raw={raw!r}: "
+            "VLAN range start must not exceed its end"
+        )
+    return list(range(start, end + 1))
+
+
 def parse_static_vlans(html: str) -> list[VlanEntry]:
     """Parse the static VLAN list page and return VLAN entries.
 
@@ -104,7 +124,8 @@ def parse_port_vlan_settings(html: str) -> list[VlanPortConfig]:
     +------+-----------+-------------+-------------+-------------+
 
     Permit VLANs may be ``--`` (none), a single integer, or a
-    comma- / underscore-separated list (e.g. ``1,10`` or ``1_10``).
+    comma- / underscore-separated list of IDs and inclusive ranges
+    (e.g. ``1,10-12`` or ``1_10_12``).
 
     Args:
         html: Raw HTML from the port-based VLAN configuration page.
@@ -222,8 +243,8 @@ def parse_port_vlan_settings(html: str) -> list[VlanPortConfig]:
                         f"raw={permit_vlan_text!r} context={context}: empty token"
                     )
                 try:
-                    permit_vlans.append(
-                        _parse_vlan_id(token, field="permit_vlans", context=context)
+                    permit_vlans.extend(
+                        _parse_permit_vlan_token(token, context=context)
                     )
                 except JTComParseError as exc:
                     raise JTComParseError(

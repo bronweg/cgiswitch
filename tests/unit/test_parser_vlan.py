@@ -274,6 +274,14 @@ def test_port_trunk_mode_permit_underscore_separated() -> None:
     assert cfg.permit_vlans == [10, 20, 30]
 
 
+def test_port_trunk_mode_permit_inclusive_ranges_and_ids() -> None:
+    """Hardware range output expands inclusively alongside individual IDs."""
+    rows = _make_port_row("Port 2", "Trunk", "--", "3000", "1,3000-3001,4094")
+    html = _PORT_BASED_TEMPLATE.format(rows=rows)
+    cfg = parse_port_vlan_settings(html)[0]
+    assert cfg.permit_vlans == [1, 3000, 3001, 4094]
+
+
 def test_port_trunk_mode_single_permit() -> None:
     """Single permit VLAN is returned as a one-element list."""
     rows = _make_port_row("Port 5", "Trunk", "--", "1", "100")
@@ -318,7 +326,25 @@ def test_invalid_static_vlan_ids_are_not_discarded(value: str) -> None:
         parse_static_vlans(_STATIC_TEMPLATE.format(rows=row))
 
 
-@pytest.mark.parametrize("value", ["", "0", "4095", "1,,10", "1__10", "1,", ",1", "1,bad"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "0",
+        "4095",
+        "0-2",
+        "4093-4095",
+        "3001-3000",
+        "1-",
+        "-10",
+        "1--10",
+        "1,,10",
+        "1__10",
+        "1,",
+        ",1",
+        "1,bad",
+    ],
+)
 def test_invalid_permit_list_is_not_partially_accepted(value: str) -> None:
     row = _make_port_row("Port 3", "Trunk", "--", "1", value)
     with pytest.raises(JTComParseError, match="permit_vlans") as exc:
