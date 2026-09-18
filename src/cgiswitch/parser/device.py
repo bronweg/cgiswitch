@@ -73,7 +73,7 @@ def parse_device_info(html: str) -> DeviceInfo:
     known labels to :class:`.DeviceInfo` fields.
 
     Args:
-        html: Raw HTML from ``system_info.cgi`` (or compatible page).
+        html: Raw HTML from ``info.cgi``.
 
     Returns:
         Populated :class:`.DeviceInfo` instance.

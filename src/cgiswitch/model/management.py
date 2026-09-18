@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ManagementNetworkState:
-    """Management network state read from the switch IP settings page."""
+    """Read-only static or DHCP state from the switch IP settings page."""
 
     dhcp_enabled: bool
     ip_address: str
@@ -18,7 +18,11 @@ class ManagementNetworkState:
 
 @dataclass(frozen=True)
 class ManagementNetworkConfig:
-    """Desired static IPv4 management network configuration."""
+    """Desired static IPv4 management configuration for bootstrap.
+
+    The address, prefix, and gateway are validated as one subnet. DHCP is not
+    represented by this desired input model.
+    """
 
     address: str
     prefix_length: int

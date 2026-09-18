@@ -17,7 +17,7 @@ def main() -> None:
     with JTComSwitch(
         os.environ["JTCOM_HOST"],
         os.getenv("JTCOM_USERNAME", "admin"),
-        os.getenv("JTCOM_PASSWORD", "admin"),
+        os.environ["JTCOM_PASSWORD"],
         connection=connection,
     ) as switch:
         vlans = switch.read_vlans()
