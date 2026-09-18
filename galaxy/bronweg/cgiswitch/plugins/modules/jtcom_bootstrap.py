@@ -125,7 +125,9 @@ persistence:
   type: str
   returned: success
 last_verified_endpoint:
-  description: Endpoint used for the last verified device identity and network state.
+  description: >-
+    Last endpoint with successfully verified device identity. Network verification
+    at that endpoint may not have completed.
   type: str
   returned: failure
 target_reached:

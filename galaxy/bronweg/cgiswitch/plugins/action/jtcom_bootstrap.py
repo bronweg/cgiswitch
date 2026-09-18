@@ -31,7 +31,10 @@ class ActionModule(ActionBase):  # type: ignore[misc]
 
         try:
             from cgiswitch import JTComBootstrapError, bootstrap_switch
+        except ImportError:
+            return _failure(result, "Unable to import cgiswitch bootstrap API; check installation")
 
+        try:
             outcome = bootstrap_switch(
                 config,
                 check_mode=bool(getattr(self._play_context, "check_mode", False)),
@@ -42,8 +45,6 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             return result
         except (ConnectionError, TimeoutError, ValueError, OSError) as exc:
             return _failure(result, str(exc))
-        except ImportError as exc:
-            return _failure(result, f"cgiswitch is not installed: {exc}")
         except Exception as exc:  # pragma: no cover - defensive controller boundary
             return _failure(result, str(exc))
 

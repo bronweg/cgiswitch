@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import sys
 import types
@@ -143,3 +144,29 @@ def test_missing_management_is_rejected_before_bootstrap(
     assert result['failed'] is True
     assert result['changed'] is False
     assert 'management' in result['msg']
+
+
+@pytest.mark.parametrize("error_type", [ModuleNotFoundError, ImportError])
+def test_bootstrap_api_import_failure_is_structured(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[ImportError],
+) -> None:
+    module = _load_action()
+    original_import = builtins.__import__
+    attempted = []
+
+    def broken_import(name: str, *args: object, **kwargs: object) -> object:
+        fromlist = args[2] if len(args) > 2 else kwargs.get("fromlist", ())
+        if name == "cgiswitch" and "JTComBootstrapError" in (fromlist or ()):
+            attempted.append(name)
+            raise error_type("private import diagnostics")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", broken_import)
+    result = _action(module, _valid_args()).run()
+    assert attempted == ["cgiswitch"]
+    assert result == {
+        "failed": True,
+        "changed": False,
+        "_ansible_no_log": True,
+        "msg": "Unable to import cgiswitch bootstrap API; check installation",
+    }
