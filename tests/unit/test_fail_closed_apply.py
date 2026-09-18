@@ -193,8 +193,6 @@ def test_known_preserved_fields_are_not_replaced(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.parametrize(
     "field",
     [
-        "tagged_ports",
-        "untagged_ports",
         "tagged_add",
         "tagged_remove",
         "tagged_set",

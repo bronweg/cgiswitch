@@ -88,8 +88,7 @@ VLAN membership can be expressed either by VLAN (`tagged_add`,
 
 `access_vlan` sets the untagged VLAN and clears all tagged memberships.
 It cannot be combined with `native_vlan` or any `trunk_*` field.
-Set fields replace membership; add/remove fields patch it. The supported
-`tagged_ports` and `untagged_ports` fields are replacement aliases.
+Set fields replace membership; add/remove fields patch it.
 
 Both forms are converted to the canonical on-wire model:
 

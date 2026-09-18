@@ -15,22 +15,16 @@ from cgiswitch.vendor.jtcom.mappings import SPEED_DUPLEX_ALIASES, SPEED_DUPLEX_C
 
 
 def normalize_vlan_config(cfg: VlanConfig) -> VlanConfig:
-    """Return a normalized copy of *cfg*.
-
-    Normalization rules:
-
-    - Deduplicate and sort ``tagged_ports`` and ``untagged_ports`` if they are lists.
-    - If a port appears in both lists, it is removed from ``tagged_ports`` (untagged wins).
-    - ``None`` values for port lists are preserved.
-    """
-    tagged = None if cfg.tagged_ports is None else sorted(set(cfg.tagged_ports))
-    untagged = None if cfg.untagged_ports is None else sorted(set(cfg.untagged_ports))
-
-    if tagged is not None and untagged is not None:
-        untagged_set = set(untagged)
-        tagged = [p for p in tagged if p not in untagged_set]
-
-    return replace(cfg, tagged_ports=tagged, untagged_ports=untagged)
+    """Sort and deduplicate operation lists without changing membership intent."""
+    return replace(
+        cfg,
+        tagged_add=_normalize_optional_int_list(cfg.tagged_add),
+        tagged_remove=_normalize_optional_int_list(cfg.tagged_remove),
+        tagged_set=_normalize_optional_int_list(cfg.tagged_set),
+        untagged_add=_normalize_optional_int_list(cfg.untagged_add),
+        untagged_remove=_normalize_optional_int_list(cfg.untagged_remove),
+        untagged_set=_normalize_optional_int_list(cfg.untagged_set),
+    )
 
 
 def normalize_port_config(cfg: PortConfig) -> PortConfig:

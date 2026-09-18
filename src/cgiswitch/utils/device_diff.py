@@ -200,10 +200,10 @@ def build_device_plan(
 def _vlan_membership_diffs(current: VlanConfig, desired: VlanConfig) -> dict[str, Any]:
     """Return VLAN membership diffs while preserving omitted-field semantics."""
     current_tagged: NullablePortSet = (
-        None if current.tagged_ports is None else set(current.tagged_ports)
+        None if current.tagged_set is None else set(current.tagged_set)
     )
     current_untagged: NullablePortSet = (
-        None if current.untagged_ports is None else set(current.untagged_ports)
+        None if current.untagged_set is None else set(current.untagged_set)
     )
 
     new_tagged, new_untagged = apply_vlan_membership_config(

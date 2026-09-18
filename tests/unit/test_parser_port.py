@@ -11,7 +11,6 @@ from cgiswitch.model.port import PortOperStatus, PortSettings
 from cgiswitch.parser.port import (
     _parse_actual_speed,
     parse_port_page,
-    parse_port_settings,
 )
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
@@ -199,18 +198,6 @@ def test_form_wrapped_tables_ignored() -> None:
     """
     with pytest.raises(JTComParseError):
         parse_port_page(html)
-
-
-# ---------------------------------------------------------------------------
-# parse_port_settings() shim
-# ---------------------------------------------------------------------------
-
-def test_parse_port_settings_returns_list() -> None:
-    html = _make_html(("Port 1", "Enable", "Auto", "Link Down", "On", "Off"))
-    result = parse_port_settings(html)
-    assert isinstance(result, list)
-    assert len(result) == 1
-    assert isinstance(result[0], PortSettings)
 
 
 # ---------------------------------------------------------------------------

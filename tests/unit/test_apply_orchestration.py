@@ -68,7 +68,7 @@ def test_compile_operations_are_deterministic_and_grouped() -> None:
     desired = DeviceConfig(
         vlans={
             30: VlanConfig(30, "create"),
-            10: VlanConfig(10, "renamed", tagged_ports=[]),
+            10: VlanConfig(10, "renamed", tagged_set=[]),
             20: VlanConfig(20, state="absent"),
         },
         ports={1: PortConfig(1, speed_duplex="100M/Full")},
@@ -111,7 +111,7 @@ def test_real_apply_posts_operations_in_deterministic_order(
     desired = DeviceConfig(
         vlans={
             30: VlanConfig(30, "create"),
-            10: VlanConfig(10, "renamed", tagged_ports=[]),
+            10: VlanConfig(10, "renamed", tagged_set=[]),
             20: VlanConfig(20, state="absent"),
         },
         ports={1: PortConfig(1, speed_duplex="100M/Full")},
@@ -163,7 +163,7 @@ def test_partial_write_preserves_original_error_and_completed_operations(
     switch._session.post.side_effect = [None, RuntimeError("membership rejected")]
 
     desired = DeviceConfig(
-        vlans={30: VlanConfig(30, "create"), 10: VlanConfig(10, "old", tagged_ports=[])},
+        vlans={30: VlanConfig(30, "create"), 10: VlanConfig(10, "old", tagged_set=[])},
     )
     with pytest.raises(JTComApplyError) as error:
         switch.apply(desired)

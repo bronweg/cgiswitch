@@ -114,26 +114,6 @@ def parse_port_page(
 
 
 # ---------------------------------------------------------------------------
-# Legacy shim — keep old function name so existing callers compile.
-# Will be removed once all call sites are updated.
-# ---------------------------------------------------------------------------
-
-def parse_port_settings(html: str) -> list[PortSettings]:
-    """Parse port settings; returns only the settings list.
-
-    Prefer :func:`parse_port_page` for full settings + oper data.
-
-    Args:
-        html: Raw HTML from ``port.cgi``.
-
-    Returns:
-        List of :class:`.PortSettings` objects.
-    """
-    settings, _ = parse_port_page(html)
-    return settings
-
-
-# ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
 

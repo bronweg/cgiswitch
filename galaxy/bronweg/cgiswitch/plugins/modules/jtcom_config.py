@@ -93,8 +93,7 @@ options:
       ASCII decimal strings and are normalized to integers; duplicate keys
       after normalization are rejected. IDs must be in the range 1..4094.
       Each entry is a map with only these keys: C(name) (string or null),
-      C(tagged_ports), C(untagged_ports), C(tagged_add), C(tagged_remove),
-      C(tagged_set), C(untagged_add), C(untagged_remove), and
+      C(tagged_add), C(tagged_remove), C(tagged_set), C(untagged_add), C(untagged_remove), and
       C(untagged_set) (lists of strict integer port IDs), and C(state)
       (C(present) or C(absent)). A null optional value leaves that field
       unchanged. Null maps and null entries are rejected; an empty map means
@@ -118,7 +117,7 @@ options:
       corresponding field unchanged. Null maps and null entries are rejected.
       C(speed) accepts C(Auto), C(10M/Half), C(10M/Full), C(100M/Half),
       C(100M/Full), C(1000M/Full), C(2500M/Full), and C(10G/Full), plus
-      existing aliases such as C(1G/Full). Unknown speed strings are rejected.
+      accepted shorthand such as C(1G/Full). Unknown speed strings are rejected.
       C(trunk_set_vlans) cannot be combined with C(trunk_add_vlans) or
       C(trunk_remove_vlans). Empty set lists clear tagged membership.
       Unknown entry keys are rejected.

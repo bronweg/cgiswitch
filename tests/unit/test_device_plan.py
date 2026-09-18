@@ -33,8 +33,8 @@ def _vlan(
     return VlanConfig(
         vlan_id=vid,
         name=name,
-        tagged_ports=tagged or [],
-        untagged_ports=untagged or [],
+        tagged_set=tagged or [],
+        untagged_set=untagged or [],
         state=state,
     )
 
@@ -140,8 +140,8 @@ def test_vlan_update_preserves_none_membership_when_side_omitted() -> None:
             10: VlanConfig(
                 vlan_id=10,
                 name="data",
-                tagged_ports=None,
-                untagged_ports=[],
+                tagged_set=None,
+                untagged_set=[],
             )
         }
     )
@@ -151,7 +151,7 @@ def test_vlan_update_preserves_none_membership_when_side_omitted() -> None:
 
 
 def test_vlan_update_remove_only_membership_diff_shows_resulting_membership() -> None:
-    cur = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_ports=[10, 20, 30])})
+    cur = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_set=[10, 20, 30])})
     des = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_remove=[20])})
     plan = build_device_plan(cur, des)
     assert len(plan.changes) == 1
@@ -163,7 +163,7 @@ def test_vlan_update_remove_only_membership_diff_shows_resulting_membership() ->
 
 
 def test_vlan_update_add_remove_membership_diff_shows_resulting_membership() -> None:
-    cur = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_ports=[10, 20])})
+    cur = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_set=[10, 20])})
     des = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_add=[30], tagged_remove=[10])})
     plan = build_device_plan(cur, des)
     assert len(plan.changes) == 1
@@ -176,7 +176,7 @@ def test_vlan_update_add_remove_membership_diff_shows_resulting_membership() -> 
 
 def test_vlan_update_unknown_baseline_add_remove_has_structured_meta() -> None:
     cur = _cfg(
-        vlans={10: VlanConfig(vlan_id=10, tagged_ports=None, untagged_ports=[])}
+        vlans={10: VlanConfig(vlan_id=10, tagged_set=None, untagged_set=[])}
     )
     des = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_add=[3], tagged_remove=[1])})
     plan = build_device_plan(cur, des)

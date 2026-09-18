@@ -74,8 +74,8 @@ def render_effective_diff(
             vlan_id=vlan_id,
             name=source.name,
             state=source.state,
-            tagged_ports=tagged_ports,
-            untagged_ports=untagged_ports,
+            tagged_set=tagged_ports,
+            untagged_set=untagged_ports,
         )
 
     effective = DeviceConfig(

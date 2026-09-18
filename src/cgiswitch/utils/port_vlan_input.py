@@ -163,8 +163,6 @@ def port_has_vlan_membership_input(port: PortConfig) -> bool:
 def _clone_vlan_config(cfg: VlanConfig) -> VlanConfig:
     return replace(
         cfg,
-        tagged_ports=None if cfg.tagged_ports is None else list(cfg.tagged_ports),
-        untagged_ports=None if cfg.untagged_ports is None else list(cfg.untagged_ports),
         tagged_add=None if cfg.tagged_add is None else list(cfg.tagged_add),
         tagged_remove=None if cfg.tagged_remove is None else list(cfg.tagged_remove),
         tagged_set=None if cfg.tagged_set is None else list(cfg.tagged_set),
@@ -246,7 +244,7 @@ def _merge_port_op(
         )
 
     if side == "tagged":
-        if cfg.tagged_ports is not None or cfg.tagged_set is not None:
+        if cfg.tagged_set is not None:
             _assert_set_compatible(cfg, side, op, port_id)
             vlans[vlan_id] = cfg
             return
@@ -257,7 +255,7 @@ def _merge_port_op(
         vlans[vlan_id] = replace(cfg, tagged_add=tagged_add, tagged_remove=tagged_remove)
         return
 
-    if cfg.untagged_ports is not None or cfg.untagged_set is not None:
+    if cfg.untagged_set is not None:
         _assert_set_compatible(cfg, side, op, port_id)
         vlans[vlan_id] = cfg
         return
@@ -275,13 +273,12 @@ def _assert_set_compatible(
     port_id: int,
 ) -> None:
     ports = cfg.tagged_set if side == "tagged" else cfg.untagged_set
-    legacy_ports = cfg.tagged_ports if side == "tagged" else cfg.untagged_ports
-    set_ports = set(ports if ports is not None else legacy_ports or [])
+    set_ports = set(ports or [])
     if (op == "add" and port_id in set_ports) or (op == "remove" and port_id not in set_ports):
         return
     raise DualSyntaxConflictError(
         f"Port-centric {side}_{op} for port_id={port_id} VLAN {cfg.vlan_id} conflicts with "
-        f"VLAN-centric {side}_set/{side}_ports."
+        f"VLAN-centric {side}_set."
     )
 
 

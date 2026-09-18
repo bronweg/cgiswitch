@@ -202,7 +202,7 @@ def test_policy_violations_are_aggregated_and_overrides_are_independent() -> Non
     assert [item["type"] for item in move_allowed.warnings] == ["untagged_move"]
 
 
-def test_omitted_legacy_fields_are_noop_not_empty_replacement() -> None:
+def test_omitted_membership_operations_leave_port_state_unchanged() -> None:
     current = {5: make_port_state(untagged_vlan=10, tagged_vlans={20, 30})}
     plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20)])
     assert plan.changed_ports == []
@@ -765,13 +765,13 @@ def test_ansible_parser_preserves_missing_none_and_empty_list() -> None:
         parse_desired_config,
     )
 
-    for entry in ({}, {"tagged_ports": None}):
-        assert parse_desired_config({"vlans": {10: entry}}).vlans[10].tagged_ports is None
+    for entry in ({}, {"tagged_set": None}):
+        assert parse_desired_config({"vlans": {10: entry}}).vlans[10].tagged_set is None
     desired = parse_desired_config({
-        "vlans": {10: {"tagged_ports": []}},
+        "vlans": {10: {"tagged_set": []}},
         "ports": {1: {"access_vlan": None}, 2: {"access_vlan": 10}},
     })
-    assert desired.vlans[10].tagged_ports == []
+    assert desired.vlans[10].tagged_set == []
     assert desired.ports[1].access_vlan is None
     assert desired.ports[2].access_vlan == 10
 

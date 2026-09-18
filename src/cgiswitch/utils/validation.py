@@ -24,8 +24,6 @@ def validate_desired_config(desired: DeviceConfig, current_ports: list[PortSetti
             )
     for vlan in desired.vlans.values():
         for ports in (
-            vlan.tagged_ports,
-            vlan.untagged_ports,
             vlan.tagged_add,
             vlan.tagged_remove,
             vlan.tagged_set,
