@@ -126,3 +126,20 @@ def test_bootstrap_error_is_returned_as_safe_structured_result(
     result = _action(module, _valid_args()).run()
     assert result["failed"] is True
     assert result["_ansible_no_log"] is True
+
+
+def test_missing_management_is_rejected_before_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_action()
+    args = _valid_args()
+    del args['management']
+
+    def unexpected_bootstrap(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail('Missing management must fail before bootstrap')
+
+    monkeypatch.setattr('cgiswitch.bootstrap_switch', unexpected_bootstrap)
+    result = _action(module, args).run()
+    assert result['failed'] is True
+    assert result['changed'] is False
+    assert 'management' in result['msg']

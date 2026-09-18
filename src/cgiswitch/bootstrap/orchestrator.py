@@ -33,9 +33,9 @@ class JTComBootstrapError(JTComError):
 def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> dict[str, Any]:
     """Converge a known switch using one public, controller-side bootstrap path.
 
-    Save is required on the tested firmware after actual changes. An already
-    desired running state produces a zero-write no-op; it cannot prove that a
-    previous interrupted run saved the configuration to persistent storage.
+    Every non-check run verifies the final identity and network before one
+    save barrier, including a logically unchanged rerun. Runtime readback cannot
+    prove prior persistence. Check mode never saves or changes configuration.
     """
     if not isinstance(config, BootstrapConfig) or type(check_mode) is not bool:
         raise ValueError('Validated BootstrapConfig and boolean check_mode are required')
@@ -43,6 +43,7 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
     failed_operation: dict[str, str] | None = None
     completed: list[dict[str, str]] = []
     write_attempted = False
+    logical_changed = False
     endpoint: str | None = None
     identity: DeviceIdentity | None = None
     try:
@@ -53,13 +54,13 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
             operations.append({'key': 'credentials:update'})
         if candidate.network != config.management.as_state():
             operations.append({'key': 'management_network:update'})
-        if check_mode or not operations:
+        if check_mode:
             return {
                 'changed': bool(operations), 'operations': operations,
                 'completed_operations': [], 'endpoint': endpoint,
                 'device_identity': asdict(identity),
                 'target_reached': endpoint == config.target_url.rstrip('/'),
-                'persistence': 'save_required' if operations else 'not_observed',
+                'persistence': 'save_required',
             }
         result: CredentialTransitionResult | NetworkTransitionResult
         for operation in operations:
@@ -78,6 +79,7 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
                     poll_interval_s=config.poll_interval_s, verify_tls=config.verify_tls,
                     expected_identity=identity,
                 )
+            logical_changed = logical_changed or result.changed
             write_attempted = write_attempted or result.changed
             endpoint = result.endpoint
             completed.append(operation.copy())
@@ -98,17 +100,18 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
         finally:
             session._discard()
         return {
-            'changed': True, 'operations': operations, 'completed_operations': completed,
+            'changed': logical_changed, 'operations': operations, 'completed_operations': completed,
             'endpoint': config.target_url.rstrip('/'), 'device_identity': asdict(identity),
             'target_reached': True, 'persistence': 'saved',
         }
     except Exception as error:
         if isinstance(error, JTComTransitionError):
+            logical_changed = logical_changed or error.write_attempted
             write_attempted = write_attempted or error.write_attempted
             if error.last_verified_identity is not None:
                 identity = error.last_verified_identity
         raise JTComBootstrapError({
-            'failed': True, 'changed': write_attempted, 'stage': stage,
+            'failed': True, 'changed': logical_changed, 'stage': stage,
             'write_attempted': write_attempted, 'completed_operations': completed,
             'failed_operation': failed_operation, 'last_verified_endpoint': endpoint,
             'device_identity': asdict(identity) if identity else None,

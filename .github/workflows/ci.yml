@@ -42,4 +42,5 @@ jobs:
         run: |
           ansible-galaxy collection install "${{ runner.temp }}"/galaxy-dist/*.tar.gz --force
           ansible-doc bronweg.cgiswitch.jtcom_config
+          ansible-doc bronweg.cgiswitch.jtcom_bootstrap
           ansible-playbook -i localhost, --syntax-check galaxy/bronweg/cgiswitch/examples/*.yml

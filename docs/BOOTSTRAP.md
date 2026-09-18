@@ -2,9 +2,10 @@
 
 The bootstrap workflow moves a JTCom switch from its factory management
 endpoint to its target management endpoint. It can transition credentials and
-the management network, then saves the configuration when either value
-changed. The workflow is intended to be called by the controller's external
-IaC; it does not configure the controller network.
+the management network, then verifies the final identity and network state and
+performs one configuration save as a persistence barrier. The workflow is
+intended to be called by the controller's external IaC; it does not configure
+the controller network.
 
 Hardware validation for the complete workflow is still pending. The examples
 below use documentation addresses and placeholders. Keep credentials in the
@@ -39,13 +40,15 @@ config = BootstrapConfig(
 result = bootstrap_switch(config)
 ```
 
-`expected_mac` and/or `expected_serial` is required. If both are supplied,
-both must identify the same device. `management` is optional when only the
-credential transition is needed; when supplied it contains `address`,
-`prefix_length`, and `gateway`.
+`BootstrapConfig`, `ManagementNetworkConfig`, and `bootstrap_switch` are
+available from the top-level `cgiswitch` package.
 
-Factory and target endpoints must be explicit IPv4 URLs. When `management` is
-supplied, `target_url`'s host must equal `management.address`; the factory URL
+`management` is required and contains `address`, `prefix_length`, and
+`gateway`. `expected_mac` and/or `expected_serial` is required. If both are
+supplied, both must identify the same device.
+
+Factory and target endpoints must be explicit IPv4 URLs. `target_url`'s host
+must equal `management.address`; the factory URL
 must point to the factory endpoint being discovered. Do not use a hostname, an
 implicit scheme, or an endpoint that can resolve to another address.
 `verify_tls` controls certificate verification for HTTPS. The timeout values
@@ -66,9 +69,12 @@ target endpoints are different devices, fails the workflow before writes.
 
 The resulting state is classified as one of `factory`, `passworddone`,
 `networkdone`, or `fulltarget`. Credential changes are planned before network
-changes. The workflow writes credentials, then the management network, and
-saves only if at least one of those values changed. A no-op has zero
-configuration POSTs.
+changes. The workflow writes credentials, then the management network when
+needed, verifies the final identity and network state, and performs exactly one
+save on every successful non-check run. `changed` describes logical password
+and network changes; the save POST is a persistence barrier and does not count
+as a logical change. A rerun in `fulltarget` therefore has `changed: false`,
+`operations: []`, no password or network POST, and one save.
 
 ## Ansible interface
 
@@ -96,29 +102,31 @@ the management network is a nested mapping:
 Password variables must come from Ansible variables, a vault, or another
 secret provider. Do not replace the placeholders with literal passwords.
 
-Check mode performs authentication and GET discovery only. It can report the
-planned primary operations `credentials:update` and
+Check mode performs authentication POSTs and GET discovery only. It can report
+the planned primary operations `credentials:update` and
 `management_network:update`; save is represented as a postcondition, not as a
-third planned operation. No configuration POST is made in check mode.
+third planned operation. No configuration POST or save is made in check mode.
+Every check-mode result reports `persistence: save_required`, including a
+logical no-op.
 
 ## Persistence and failures
 
 The underlying hardware transitions require a subsequent save to persist
 credential and management-network writes, and the workflow does not reboot the
-switch automatically. A successful save is therefore part of the
-postcondition for a changed run.
+switch automatically. A successful non-check run verifies final identity and
+network state immediately before its one save barrier and reports
+`persistence: saved`, including when no logical change was needed.
 
 Failures retain structured context: `stage`, `completed_operations`,
-`failed_operation`, `write_attempted`, `last_endpoint`, and the verified
-identity. This distinguishes discovery, credential, network, and save
+`failed_operation`, `write_attempted`, `last_verified_endpoint`, and the
+verified identity. This distinguishes discovery, credential, network, and save
 failures from transport errors.
 
 If a process is interrupted after a credential or network POST but before the
 save, a later run may observe `fulltarget` while the earlier writes are not
 known to be durable. The workflow cannot confirm flash durability from that
-observation alone. A zero-write no-op on rerun must not be treated as proof
-that the interrupted state was persisted; use an explicit repair decision if
-the operator needs to address that ambiguity.
+observation alone. The automatic save barrier on every successful non-check
+run reconciles that crash-before-save case.
 
 Bootstrap does not restore or reset a switch, upgrade firmware, or choose
 production or homelab addressing. Those actions and the controller's network

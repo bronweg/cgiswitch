@@ -10,15 +10,16 @@ short_description: Bootstrap a JTCom switch onto a management network
 description:
   - >-
     Discovers the factory switch, authenticates, configures the management
-    network, and saves the configuration when changed.
+    network, verifies final identity and network state, and performs one save
+    persistence barrier on every successful non-check run.
   - The action runs on the Ansible controller and calls the cgiswitch Python API.
   - >-
-    Check mode performs authentication and GET discovery only; it does not
-    POST, save, reboot, or change the network.
-  - A no-op emits zero configuration POSTs.
+    Check mode performs authentication POSTs and GET discovery only; it does
+    not make configuration POSTs, save, reboot, or change the network.
   - >-
     A crash after a write and before save cannot be confirmed as persisted
-    because the firmware has no confirmed persisted readback.
+    because the firmware has no confirmed persisted readback; the automatic
+    save barrier on a later successful run reconciles that case.
 options:
   factory_url:
     description: Factory URL used for discovery and initial authentication.
@@ -95,7 +96,10 @@ EXAMPLES = r"""
 
 RETURN = r"""
 changed:
-  description: Whether bootstrap wrote a configuration change.
+  description: >-
+    Whether the requested password or management network differed from the
+    discovered state. Check mode reports predicted logical changes. The save
+    persistence barrier does not count as a logical change.
   type: bool
   returned: always
 operations:
@@ -115,9 +119,15 @@ device_identity:
   type: dict
   returned: success
 persistence:
-  description: Persistence observation state.
+  description: >-
+    Persistence observation state. Check mode always returns save_required,
+    including a logical no-op; every successful non-check run returns saved.
   type: str
   returned: success
+last_verified_endpoint:
+  description: Endpoint used for the last verified device identity and network state.
+  type: str
+  returned: failure
 target_reached:
   description: Whether the target endpoint was reached.
   type: bool

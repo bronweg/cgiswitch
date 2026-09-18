@@ -49,16 +49,20 @@ def validate_endpoint(url: str) -> str:
 
 def transition_management_network(
     old_url: str, target_url: str, credentials: JTComCredentials,
-    desired: ManagementNetworkConfig, *, timeout_s: float = 5.0,
+    desired: ManagementNetworkConfig, *, expected_identity: DeviceIdentity,
+    timeout_s: float = 5.0,
     transition_timeout_s: float = 60.0, poll_interval_s: float = 1.0,
-    verify_tls: bool = True, expected_identity: DeviceIdentity | None = None,
+    verify_tls: bool = True,
 ) -> NetworkTransitionResult:
     """Reconcile one IP POST by observing the same device at the target URL.
 
-    No persistence or reboot policy is inferred. Callers own discovery and
-    explicit recovery. This is an internal primitive for the future bootstrap API.
+    The caller must supply expected identity. It is verified on connection
+    and again immediately before the IP write. No persistence or reboot
+    policy is inferred; callers own discovery, save, and explicit recovery.
     """
     old_url, target_url = validate_endpoint(old_url), validate_endpoint(target_url)
+    if not isinstance(expected_identity, DeviceIdentity):
+        raise ValueError('Externally supplied expected identity is required')
     if not isinstance(desired, ManagementNetworkConfig):
         raise ValueError('A validated static management configuration is required')
     if urlsplit(target_url).hostname != desired.address:
@@ -80,8 +84,7 @@ def transition_management_network(
         current.login()
         stage = 'read_identity'
         device = parse_device_info(current.get(DEVICE_INFO))
-        if expected_identity is not None:
-            expected_identity.verify(device)
+        expected_identity.verify(device)
         identity = DeviceIdentity.from_device(device)
         stage = 'read_network'
         state = read_management_network(current)
@@ -112,6 +115,10 @@ def transition_management_network(
             finally:
                 target._discard()
                 target = None
+        stage = 'verify_source_identity'
+        device = parse_device_info(current.get(DEVICE_INFO))
+        expected_identity.verify(device)
+        identity.verify(device)
         stage = 'write_network'
         write_attempted = True
         try:

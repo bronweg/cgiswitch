@@ -44,10 +44,12 @@ the core in the Ansible controller's Python environment, so this checkout's
 The `BootstrapConfig` / `bootstrap_switch` API and the
 `bronweg.cgiswitch.jtcom_bootstrap` Ansible interface can transition JTCom
 credentials and management addressing from factory to target endpoints. The
-workflow verifies device identity across all credential and endpoint probes,
-orders credential changes before network changes, and saves only when a
-change is required. See [the bootstrap guide](docs/BOOTSTRAP.md) for endpoint
-requirements, check-mode behavior, persistence limits, and secret handling.
+workflow requires a static management configuration, verifies device identity
+across all credential and endpoint probes, orders credential changes before
+network changes, verifies final identity and network state, and performs one
+save persistence barrier on every successful non-check run. See [the bootstrap
+guide](docs/BOOTSTRAP.md) for endpoint requirements, check-mode behavior,
+persistence limits, and secret handling.
 
 Complete hardware validation of this workflow is still pending.
 

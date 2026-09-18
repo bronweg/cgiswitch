@@ -2,6 +2,7 @@
 
 from cgiswitch.bootstrap import BootstrapConfig, JTComBootstrapError, bootstrap_switch
 from cgiswitch.client.errors import JTComApplyError, JTComPolicyError
+from cgiswitch.model.management import ManagementNetworkConfig
 from cgiswitch.model.options import ApplyPolicy, JTComConnectionOptions
 from cgiswitch.switch import JTComSwitch
 
@@ -14,5 +15,6 @@ __all__ = [
     "JTComConnectionOptions",
     "JTComPolicyError",
     "JTComSwitch",
+    "ManagementNetworkConfig",
 ]
 __version__ = "0.1.0"
