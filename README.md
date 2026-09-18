@@ -39,6 +39,18 @@ the core in the Ansible controller's Python environment, so this checkout's
 `cgiswitch` package must be installed there as well. The supported Ansible interface is
 `bronweg.cgiswitch.jtcom_config`.
 
+## Bootstrap
+
+The `BootstrapConfig` / `bootstrap_switch` API and the
+`bronweg.cgiswitch.jtcom_bootstrap` Ansible interface can transition JTCom
+credentials and management addressing from factory to target endpoints. The
+workflow verifies device identity across all credential and endpoint probes,
+orders credential changes before network changes, and saves only when a
+change is required. See [the bootstrap guide](docs/BOOTSTRAP.md) for endpoint
+requirements, check-mode behavior, persistence limits, and secret handling.
+
+Complete hardware validation of this workflow is still pending.
+
 ## Connection scheme and TLS
 
 For an Ansible `host` without a scheme, `verify_tls: true` (the default)

@@ -51,7 +51,7 @@ def transition_management_network(
     old_url: str, target_url: str, credentials: JTComCredentials,
     desired: ManagementNetworkConfig, *, timeout_s: float = 5.0,
     transition_timeout_s: float = 60.0, poll_interval_s: float = 1.0,
-    verify_tls: bool = True,
+    verify_tls: bool = True, expected_identity: DeviceIdentity | None = None,
 ) -> NetworkTransitionResult:
     """Reconcile one IP POST by observing the same device at the target URL.
 
@@ -79,7 +79,10 @@ def transition_management_network(
         current = JTComSession(old_url, credentials, timeout_s=timeout_s, verify_tls=verify_tls)
         current.login()
         stage = 'read_identity'
-        identity = DeviceIdentity.from_device(parse_device_info(current.get(DEVICE_INFO)))
+        device = parse_device_info(current.get(DEVICE_INFO))
+        if expected_identity is not None:
+            expected_identity.verify(device)
+        identity = DeviceIdentity.from_device(device)
         stage = 'read_network'
         state = read_management_network(current)
         if state == desired.as_state():
