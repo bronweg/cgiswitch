@@ -69,8 +69,8 @@ class DeviceConfig:
             vlans[vid] = VlanConfig(
                 vlan_id=vid,
                 name=entry.name,
-                tagged_ports=sorted(tagged),
-                untagged_ports=sorted(untagged),
+                tagged_set=sorted(tagged),
+                untagged_set=sorted(untagged),
             )
 
         ports: dict[int, PortConfig] = {}

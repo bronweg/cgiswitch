@@ -125,13 +125,13 @@ class TestUpdateMembership:
     def test_membership_change_detected(self) -> None:
         current = {10: make_entry(10, untagged_ports=["Port 1"])}
         # desired: Port 1 unchanged, Port 2 added.
-        desired = {10: make_cfg(10, untagged_ports=[1, 2])}
+        desired = {10: make_cfg(10, untagged_set=[1, 2])}
         cs = plan_vlan_changes(current, desired)
         assert [u.vlan_id for u in cs.update] == [10]
 
     def test_membership_same_not_flagged(self) -> None:
         current = {10: make_entry(10, untagged_ports=["Port 1"])}
-        desired = {10: make_cfg(10, untagged_ports=[1])}
+        desired = {10: make_cfg(10, untagged_set=[1])}
         cs = plan_vlan_changes(current, desired)
         assert cs.update == []
 

@@ -90,8 +90,6 @@ def parse_static_vlans(html: str) -> list[VlanEntry]:
             )
         vlan_id_text = normalize_text(tds[2].get_text())
         vlan_name_text = normalize_text(tds[3].get_text())
-        if vlan_id_text.lower() == "vlan id" and vlan_name_text.lower() == "vlan name":
-            continue  # a legacy table may use <td> for its header
         vlan_id = _parse_vlan_id(
             vlan_id_text,
             field="vlan_id",
@@ -266,15 +264,3 @@ def parse_port_vlan_settings(html: str) -> list[VlanPortConfig]:
             "parse_port_vlan_settings field='rows' raw=[]: no port VLAN entries found"
         )
     return configs
-
-
-def parse_port_based_vlans(html: str) -> list[VlanPortConfig]:
-    """Compatibility shim — delegates to :func:`parse_port_vlan_settings`.
-
-    Args:
-        html: Raw HTML from the port-based VLAN configuration page.
-
-    Returns:
-        List of :class:`~cgiswitch.model.vlan.VlanPortConfig` objects.
-    """
-    return parse_port_vlan_settings(html)

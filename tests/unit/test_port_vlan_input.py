@@ -219,6 +219,77 @@ def test_trunk_set_conflicts_with_vlan_centric_tagged_ops_for_same_port() -> Non
         )
 
 
+def test_port_tagged_add_matching_set_is_compatible() -> None:
+    merged = merge_port_vlan_membership_inputs(
+        {5: make_port_state()},
+        {20: VlanConfig(vlan_id=20, tagged_set=[5])},
+        {5: PortConfig(port_id=5, trunk_add_vlans=[20])},
+        known_vlan_ids={20},
+    )
+
+    assert merged[20].tagged_set == [5]
+
+
+@pytest.mark.parametrize(
+    ("port_config", "port_key"),
+    [
+        (PortConfig(port_id=6, trunk_add_vlans=[20]), 6),
+        (PortConfig(port_id=5, trunk_remove_vlans=[20]), 5),
+    ],
+)
+def test_port_tagged_operation_conflicts_with_vlan_tagged_set(
+    port_config: PortConfig, port_key: int,
+) -> None:
+    with pytest.raises(DualSyntaxConflictError, match="tagged"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {20: VlanConfig(vlan_id=20, tagged_set=[5])},
+            {port_key: port_config},
+            known_vlan_ids={20},
+        )
+
+
+def test_port_tagged_remove_matching_set_is_compatible() -> None:
+    merged = merge_port_vlan_membership_inputs(
+        {5: make_port_state(tagged_vlans={20})},
+        {20: VlanConfig(vlan_id=20, tagged_set=[])},
+        {5: PortConfig(port_id=5, trunk_remove_vlans=[20])},
+        known_vlan_ids={20},
+    )
+
+    assert merged[20].tagged_set == []
+
+
+def test_port_untagged_add_matching_set_is_compatible() -> None:
+    merged = merge_port_vlan_membership_inputs(
+        {5: make_port_state()},
+        {20: VlanConfig(vlan_id=20, untagged_set=[5])},
+        {5: PortConfig(port_id=5, native_vlan=20)},
+        known_vlan_ids={20},
+    )
+
+    assert merged[20].untagged_set == [5]
+
+
+@pytest.mark.parametrize(
+    "port_config",
+    [
+        PortConfig(port_id=5, native_vlan=20),
+        PortConfig(port_id=5, access_vlan=20),
+    ],
+)
+def test_port_untagged_operation_conflicts_with_vlan_untagged_set(
+    port_config: PortConfig,
+) -> None:
+    with pytest.raises(DualSyntaxConflictError, match="untagged_set"):
+        merge_port_vlan_membership_inputs(
+            {5: make_port_state()},
+            {20: VlanConfig(vlan_id=20, untagged_set=[])},
+            {5: port_config},
+            known_vlan_ids={20},
+        )
+
+
 def test_switch_check_mode_accepts_port_centric_vlan_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

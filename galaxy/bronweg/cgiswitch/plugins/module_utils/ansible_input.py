@@ -15,8 +15,6 @@ _VLAN_KEYS = frozenset(
     {
         "name",
         "state",
-        "tagged_ports",
-        "untagged_ports",
         "tagged_add",
         "tagged_remove",
         "tagged_set",
@@ -128,10 +126,6 @@ def _parse_vlan_entry(value: object, path: str, vlan_id: int) -> VlanConfig:
             vlan_id=vlan_id,
             name=name,
             state=state,
-            tagged_ports=_parse_id_list(entry.get("tagged_ports"), f"{path}.tagged_ports", "port"),
-            untagged_ports=_parse_id_list(
-                entry.get("untagged_ports"), f"{path}.untagged_ports", "port"
-            ),
             tagged_add=_parse_id_list(entry.get("tagged_add"), f"{path}.tagged_add", "port"),
             tagged_remove=_parse_id_list(
                 entry.get("tagged_remove"), f"{path}.tagged_remove", "port"

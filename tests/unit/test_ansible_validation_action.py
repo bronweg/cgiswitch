@@ -52,6 +52,8 @@ def _assert_rejected_without_switch(
         {"ports": {1: []}},
         {"ports": {1: "entry"}},
         {"ports": {1: {"flow_controll": True}}},
+        {"vlans": {10: {"tagged_ports": [1]}}},
+        {"vlans": {10: {"untagged_ports": [1]}}},
         {"vlans": {10: {"unknown": True}}},
         {"vlans": {10: {1: True}}},
         {"vlans": {10: {1: True, "oops": False}}},
@@ -96,12 +98,12 @@ def test_invalid_ids_and_duplicate_normalized_keys_fail_before_switch(
 @pytest.mark.parametrize(
     "args",
     [
-        {"vlans": {10: {"tagged_ports": 1}}},
-        {"vlans": {10: {"tagged_ports": "1"}}},
-        {"vlans": {10: {"tagged_ports": [1, True]}}},
-        {"vlans": {10: {"tagged_ports": [1.0]}}},
-        {"vlans": {10: {"tagged_ports": ["1"]}}},
-        {"vlans": {10: {"tagged_ports": [0]}}},
+        {"vlans": {10: {"tagged_set": 1}}},
+        {"vlans": {10: {"tagged_set": "1"}}},
+        {"vlans": {10: {"tagged_set": [1, True]}}},
+        {"vlans": {10: {"tagged_set": [1.0]}}},
+        {"vlans": {10: {"tagged_set": ["1"]}}},
+        {"vlans": {10: {"tagged_set": [0]}}},
         {"vlans": {10: {"name": 10}}},
         {"vlans": {10: {"state": True}}},
         {"ports": {1: {"admin_up": 1}}},
@@ -182,7 +184,7 @@ def test_optional_null_values_are_forwarded_unchanged(
     result = _action(
         module,
         {
-            "vlans": {"10": {"name": None, "tagged_ports": None, "state": "present"}},
+            "vlans": {"10": {"name": None, "tagged_set": None, "state": "present"}},
             "ports": {
                 "1": {
                     "admin_up": None,
@@ -199,7 +201,7 @@ def test_optional_null_values_are_forwarded_unchanged(
     assert result["changed"] is False
     assert seen == [
         DeviceConfig(
-            vlans={10: VlanConfig(10, name=None, tagged_ports=None)},
+            vlans={10: VlanConfig(10, name=None, tagged_set=None)},
             ports={
                 1: PortConfig(
                     1,
@@ -245,7 +247,7 @@ def test_valid_config_forwards_desired_and_check_mode(
     result = _action(
         module,
         {
-            "vlans": {vlan_key: {"name": "users", "tagged_ports": [2]}},
+            "vlans": {vlan_key: {"name": "users", "tagged_set": [2]}},
             "ports": {
                 port_key: {"admin_up": True, "speed": "1G/Full", "access_vlan": int(vlan_key)}
             },
@@ -260,7 +262,7 @@ def test_valid_config_forwards_desired_and_check_mode(
                 vlans={int(vlan_key): VlanConfig(
                     int(vlan_key),
                     name="users",
-                    tagged_ports=[2],
+                    tagged_set=[2],
                 )},
                 ports={
                     int(port_key): PortConfig(
@@ -272,3 +274,13 @@ def test_valid_config_forwards_desired_and_check_mode(
             check_mode,
         )
     ]
+
+
+@pytest.mark.parametrize("key", ["tagged_ports", "untagged_ports"])
+def test_unknown_vlan_membership_keys_are_rejected(key: str) -> None:
+    from ansible_collections.bronweg.cgiswitch.plugins.module_utils.ansible_input import (
+        parse_desired_config,
+    )
+
+    with pytest.raises(ValueError, match="unknown"):
+        parse_desired_config({"vlans": {20: {key: [1, 2]}}})

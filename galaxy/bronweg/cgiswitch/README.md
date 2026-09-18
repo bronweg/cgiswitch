@@ -162,7 +162,7 @@ and VLAN deletion or membership operations that the backend cannot express.
     vlans:
       10:
         name: Management
-        untagged_ports: [1]
+        untagged_set: [1]
       99:
         state: absent
     ports:
