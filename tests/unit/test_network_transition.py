@@ -219,3 +219,57 @@ def test_external_identity_is_mandatory_before_connection(setup: dict) -> None:
         )
     setup["factory"].assert_not_called()
     setup["write"].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "fault,reached,verified_endpoint",
+    [
+        ("identity", True, OLD),
+        ("network", True, TARGET),
+        ("unreachable", False, OLD),
+    ],
+)
+def test_bootstrap_preserves_network_transition_observations(
+    setup: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    reached: bool,
+    verified_endpoint: str,
+) -> None:
+    from cgiswitch.bootstrap import orchestrator
+    from cgiswitch.bootstrap.discovery import Candidate
+    from cgiswitch.bootstrap.model import BootstrapConfig
+
+    config = BootstrapConfig(
+        factory_url=OLD, target_url=TARGET, username="admin",
+        factory_password="fixtureOld1", target_password="fixtureNew2",
+        management=DESIRED, expected_mac=IDENTITY.mac_address,
+        transition_timeout_s=1,
+    )
+    monkeypatch.setattr(
+        orchestrator, "discover",
+        lambda _: Candidate(OLD, True, EXPECTED_IDENTITY, BEFORE),
+    )
+    save = MagicMock()
+    monkeypatch.setattr(orchestrator, "save_config", save)
+    if fault == "identity":
+        setup["identity"].side_effect = [
+            IDENTITY, IDENTITY, DeviceInfo("02:00:00:00:00:02"),
+        ]
+    elif fault == "network":
+        setup["reads"].side_effect = [BEFORE, BEFORE]
+    else:
+        setup["target"].login.side_effect = unavailable()
+        monkeypatch.setattr(network.time, "monotonic", MagicMock(side_effect=[0, 0, 2, 2]))
+        monkeypatch.setattr(network.time, "sleep", MagicMock())
+    with pytest.raises(orchestrator.JTComBootstrapError) as caught:
+        orchestrator.bootstrap_switch(config)
+    result = caught.value.as_result()
+    assert result["target_reached"] is reached
+    assert result["last_verified_endpoint"] == verified_endpoint
+    assert result["stage"] == "management_network"
+    assert result["failed_operation"] == {"key": "management_network:update"}
+    assert result["changed"] and result["write_attempted"]
+    assert result["completed_operations"] == []
+    setup["write"].assert_called_once()
+    save.assert_not_called()

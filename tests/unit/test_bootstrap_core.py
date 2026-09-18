@@ -283,7 +283,10 @@ def test_unchanged_rerun_barrier_failure_is_not_a_logical_change(
     result = caught.value.as_result()
     assert result["changed"] is False
     assert result["write_attempted"] is (fault == "save")
-    assert result["failed_operation"] == {"key": "configuration:save"}
+    assert result["failed_operation"] == (
+        {"key": "configuration:save"} if fault == "save" else None
+    )
+    assert result["stage"] == ("persistence" if fault == "save" else "persistence_preflight")
     assert result["completed_operations"] == []
     assert mocks["save"].call_count == (fault == "save")
     mocks["credential"].assert_not_called()

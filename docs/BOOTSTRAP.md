@@ -131,3 +131,11 @@ run reconciles that crash-before-save case.
 Bootstrap does not restore or reset a switch, upgrade firmware, or choose
 production or homelab addressing. Those actions and the controller's network
 path remain external IaC responsibilities.
+
+
+Failure context distinguishes a reached target from a verified device identity.
+`target_reached` preserves transition observations even when subsequent verification
+fails. `last_verified_endpoint` advances only after identity verification succeeds;
+network verification can still fail at that endpoint. Final identity and network
+checks run in `persistence_preflight`, with no failed mutation operation. Only an
+attempted save is reported as `configuration:save` in the `persistence` stage.

@@ -76,16 +76,19 @@ def transition_management_network(
     identity: DeviceIdentity | None = None
     write_attempted = False
     target_reached = False
+    last_verified_endpoint: str | None = None
     stage = 'authenticate'
     current: JTComSession | None = None
     target: JTComSession | None = None
     try:
         current = JTComSession(old_url, credentials, timeout_s=timeout_s, verify_tls=verify_tls)
         current.login()
+        target_reached = old_url == target_url
         stage = 'read_identity'
         device = parse_device_info(current.get(DEVICE_INFO))
         expected_identity.verify(device)
         identity = DeviceIdentity.from_device(device)
+        last_verified_endpoint = old_url
         stage = 'read_network'
         state = read_management_network(current)
         if state == desired.as_state():
@@ -97,6 +100,7 @@ def transition_management_network(
                 target.login()
                 target_reached = True
                 identity.verify(parse_device_info(target.get(DEVICE_INFO)))
+                last_verified_endpoint = target_url
                 if read_management_network(target) != desired.as_state():
                     raise ValueError('Target management state does not match desired configuration')
             return NetworkTransitionResult(False, target_url, identity)
@@ -111,7 +115,9 @@ def transition_management_network(
             except JTComRequestError:
                 pass
             else:
+                target_reached = True
                 identity.verify(parse_device_info(target.get(DEVICE_INFO)))
+                last_verified_endpoint = target_url
             finally:
                 target._discard()
                 target = None
@@ -119,6 +125,7 @@ def transition_management_network(
         device = parse_device_info(current.get(DEVICE_INFO))
         expected_identity.verify(device)
         identity.verify(device)
+        last_verified_endpoint = old_url
         stage = 'write_network'
         write_attempted = True
         try:
@@ -143,6 +150,7 @@ def transition_management_network(
                 target_reached = True
                 stage = 'verify_identity'
                 identity.verify(parse_device_info(target.get(DEVICE_INFO)))
+                last_verified_endpoint = target_url
                 stage = 'verify_network'
                 if read_management_network(target) != desired.as_state():
                     raise ValueError('Target management state does not match desired configuration')
@@ -160,6 +168,7 @@ def transition_management_network(
             stage=stage, write_attempted=write_attempted, old_endpoint=old_url,
             target_endpoint=target_url, identity=identity, target_reached=target_reached,
             verification_completed=False, error=error,
+            last_verified_endpoint=last_verified_endpoint,
         ) from None
     finally:
         if current is not None:

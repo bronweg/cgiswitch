@@ -115,6 +115,7 @@ def transition_credentials(
             stage=stage, write_attempted=write_attempted, old_endpoint=url,
             target_endpoint=url, identity=verified, target_reached=target_reached,
             verification_completed=False, error=error,
+            last_verified_endpoint=url if verified is not None else None,
         ) from None
     finally:
         if active is not None:

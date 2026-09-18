@@ -44,11 +44,13 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
     completed: list[dict[str, str]] = []
     write_attempted = False
     logical_changed = False
+    target_reached = False
     endpoint: str | None = None
     identity: DeviceIdentity | None = None
     try:
         candidate = discover(config)
         endpoint, identity = candidate.endpoint, candidate.identity
+        target_reached = endpoint == config.target_url.rstrip('/')
         operations: list[dict[str, str]] = []
         if not candidate.target_credentials:
             operations.append({'key': 'credentials:update'})
@@ -59,7 +61,7 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
                 'changed': bool(operations), 'operations': operations,
                 'completed_operations': [], 'endpoint': endpoint,
                 'device_identity': asdict(identity),
-                'target_reached': endpoint == config.target_url.rstrip('/'),
+                'target_reached': target_reached,
                 'persistence': 'save_required',
             }
         result: CredentialTransitionResult | NetworkTransitionResult
@@ -82,18 +84,23 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
             logical_changed = logical_changed or result.changed
             write_attempted = write_attempted or result.changed
             endpoint = result.endpoint
+            target_reached = target_reached or endpoint == config.target_url.rstrip('/')
             completed.append(operation.copy())
-        stage = 'persistence'
-        failed_operation = {'key': 'configuration:save'}
+        stage = 'persistence_preflight'
+        failed_operation = None
         session = JTComSession(
             config.target_url, config.credentials(True),
             timeout_s=config.timeout_s, verify_tls=config.verify_tls,
         )
         try:
             session.login()
+            target_reached = True
             identity.verify(parse_device_info(session.get(DEVICE_INFO)))
+            endpoint = config.target_url.rstrip('/')
             if read_management_network(session) != config.management.as_state():
                 raise ValueError('Final management state changed before save')
+            stage = 'persistence'
+            failed_operation = {'key': 'configuration:save'}
             # One-shot save is a required postcondition, not another user intent.
             write_attempted = True
             save_config(session)
@@ -108,6 +115,10 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
         if isinstance(error, JTComTransitionError):
             logical_changed = logical_changed or error.write_attempted
             write_attempted = write_attempted or error.write_attempted
+            if error.target_endpoint.rstrip('/') == config.target_url.rstrip('/'):
+                target_reached = target_reached or error.target_reached
+            if error.last_verified_endpoint is not None:
+                endpoint = error.last_verified_endpoint
             if error.last_verified_identity is not None:
                 identity = error.last_verified_identity
         raise JTComBootstrapError({
@@ -115,7 +126,7 @@ def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> di
             'write_attempted': write_attempted, 'completed_operations': completed,
             'failed_operation': failed_operation, 'last_verified_endpoint': endpoint,
             'device_identity': asdict(identity) if identity else None,
-            'target_reached': endpoint == config.target_url.rstrip('/'),
+            'target_reached': target_reached,
             'underlying_exception': {'type': type(error).__name__,
                                      'message': 'Raw exception details withheld'},
         }) from None
