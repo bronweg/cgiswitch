@@ -24,7 +24,7 @@ def main() -> None:
     with JTComSwitch(
         host,
         os.getenv("JTCOM_USERNAME", "admin"),
-        os.getenv("JTCOM_PASSWORD", "admin"),
+        os.environ["JTCOM_PASSWORD"],
         connection=connection,
         policy=policy,
     ) as switch:

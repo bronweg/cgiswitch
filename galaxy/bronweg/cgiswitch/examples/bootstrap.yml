@@ -3,11 +3,13 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  check_mode: true
+  no_log: true
   tasks:
     - name: Discover and configure the switch management network
       bronweg.cgiswitch.jtcom_bootstrap:
         factory_url: http://192.0.2.1
-        target_url: https://198.51.100.10
+        target_url: http://198.51.100.10
         username: admin
         factory_password: "{{ jtcom_factory_password }}"
         password: "{{ jtcom_password }}"

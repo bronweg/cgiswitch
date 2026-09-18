@@ -4,9 +4,10 @@
   connection: local
   gather_facts: false
   check_mode: true
+  no_log: true
 
   vars:
-    switch_host: 192.0.2.1
+    switch_host: http://192.0.2.10
     switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin', true) }}"
     switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
@@ -28,6 +29,7 @@
       register: jtcom_preview
 
     - name: Show planned operations and any policy violations
+      no_log: false
       ansible.builtin.debug:
         msg:
           diff: "{{ jtcom_preview.diff | default({}) }}"
