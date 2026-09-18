@@ -38,7 +38,9 @@ A password change was not performed in this PR-11 run.
 `client/ip_ops.py` owns reads and one-shot transport using the source-backed
 payload builder. `bootstrap/network.py` owns identity checks, preflight, session
 discard, bounded target polling, and exact readback. It is an internal primitive;
-no bootstrap API is exported yet, and `JTComSwitch.apply()` is unchanged.
+no public bootstrap API was exported at the PR-11 stage. The later public
+workflow is documented in [the bootstrap guide](../BOOTSTRAP.md).
+`JTComSwitch.apply()` remains unchanged.
 
 A lost POST response triggers observation, never another configuration POST.
 Wrong identity, malformed state, rejected authentication, or mismatched final

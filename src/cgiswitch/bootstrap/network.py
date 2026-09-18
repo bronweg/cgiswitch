@@ -49,16 +49,20 @@ def validate_endpoint(url: str) -> str:
 
 def transition_management_network(
     old_url: str, target_url: str, credentials: JTComCredentials,
-    desired: ManagementNetworkConfig, *, timeout_s: float = 5.0,
+    desired: ManagementNetworkConfig, *, expected_identity: DeviceIdentity,
+    timeout_s: float = 5.0,
     transition_timeout_s: float = 60.0, poll_interval_s: float = 1.0,
     verify_tls: bool = True,
 ) -> NetworkTransitionResult:
     """Reconcile one IP POST by observing the same device at the target URL.
 
-    No persistence or reboot policy is inferred. Callers own discovery and
-    explicit recovery. This is an internal primitive for the future bootstrap API.
+    The caller must supply expected identity. It is verified on connection
+    and again immediately before the IP write. No persistence or reboot
+    policy is inferred; callers own discovery, save, and explicit recovery.
     """
     old_url, target_url = validate_endpoint(old_url), validate_endpoint(target_url)
+    if not isinstance(expected_identity, DeviceIdentity):
+        raise ValueError('Externally supplied expected identity is required')
     if not isinstance(desired, ManagementNetworkConfig):
         raise ValueError('A validated static management configuration is required')
     if urlsplit(target_url).hostname != desired.address:
@@ -72,14 +76,19 @@ def transition_management_network(
     identity: DeviceIdentity | None = None
     write_attempted = False
     target_reached = False
+    last_verified_endpoint: str | None = None
     stage = 'authenticate'
     current: JTComSession | None = None
     target: JTComSession | None = None
     try:
         current = JTComSession(old_url, credentials, timeout_s=timeout_s, verify_tls=verify_tls)
         current.login()
+        target_reached = old_url == target_url
         stage = 'read_identity'
-        identity = DeviceIdentity.from_device(parse_device_info(current.get(DEVICE_INFO)))
+        device = parse_device_info(current.get(DEVICE_INFO))
+        expected_identity.verify(device)
+        identity = DeviceIdentity.from_device(device)
+        last_verified_endpoint = old_url
         stage = 'read_network'
         state = read_management_network(current)
         if state == desired.as_state():
@@ -91,6 +100,7 @@ def transition_management_network(
                 target.login()
                 target_reached = True
                 identity.verify(parse_device_info(target.get(DEVICE_INFO)))
+                last_verified_endpoint = target_url
                 if read_management_network(target) != desired.as_state():
                     raise ValueError('Target management state does not match desired configuration')
             return NetworkTransitionResult(False, target_url, identity)
@@ -105,10 +115,17 @@ def transition_management_network(
             except JTComRequestError:
                 pass
             else:
+                target_reached = True
                 identity.verify(parse_device_info(target.get(DEVICE_INFO)))
+                last_verified_endpoint = target_url
             finally:
                 target._discard()
                 target = None
+        stage = 'verify_source_identity'
+        device = parse_device_info(current.get(DEVICE_INFO))
+        expected_identity.verify(device)
+        identity.verify(device)
+        last_verified_endpoint = old_url
         stage = 'write_network'
         write_attempted = True
         try:
@@ -133,6 +150,7 @@ def transition_management_network(
                 target_reached = True
                 stage = 'verify_identity'
                 identity.verify(parse_device_info(target.get(DEVICE_INFO)))
+                last_verified_endpoint = target_url
                 stage = 'verify_network'
                 if read_management_network(target) != desired.as_state():
                     raise ValueError('Target management state does not match desired configuration')
@@ -150,6 +168,7 @@ def transition_management_network(
             stage=stage, write_attempted=write_attempted, old_endpoint=old_url,
             target_endpoint=target_url, identity=identity, target_reached=target_reached,
             verification_completed=False, error=error,
+            last_verified_endpoint=last_verified_endpoint,
         ) from None
     finally:
         if current is not None:
