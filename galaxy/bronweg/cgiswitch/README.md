@@ -43,6 +43,17 @@ only after reviewing the plan.
       20: {name: users}
   check_mode: true
   no_log: true
+  register: config_preview
+
+- name: Review the configuration plan
+  ansible.builtin.debug:
+    msg:
+      diff: "{{ config_preview.diff | default({}) }}"
+      operations: "{{ config_preview.operations | default([]) }}"
+      warnings: "{{ config_preview.warnings | default([]) }}"
+      violations: "{{ config_preview.violations | default([]) }}"
+      blocked: "{{ config_preview.blocked | default(false) }}"
+  no_log: false
 ```
 
 [Configuration guide](https://github.com/bronweg/cgiswitch/blob/main/docs/CONFIGURATION.md)
@@ -65,6 +76,13 @@ explains membership, policy, backups and failure results.
       gateway: 198.51.100.1
   check_mode: true
   no_log: true
+  register: bootstrap_preview
+
+- name: Review the bootstrap plan
+  ansible.builtin.debug:
+    msg:
+      operations: "{{ bootstrap_preview.operations | default([]) }}"
+  no_log: false
 ```
 
 The controller must reach the factory and target networks. Bootstrap never

@@ -9,8 +9,9 @@ used by JTCom-based Ethernet switches. It provides two workflows:
 
 The project is **Alpha**. Hardware validation covers one ONTi
 **ONT-S207CW-62TS-SE**, firmware **V100SP11240725**. Controlled tests verified
-VLAN/port configuration, repeated no-op apply, bootstrap, reboot persistence,
-and restoration to the test baseline. Other firmware may use different CGI
+VLAN/port configuration and repeated no-op apply. Bootstrap tests also verified
+credential/IP persistence after reboot and restoration to the test baseline.
+VLAN/port persistence after reboot was not tested. Other firmware may use different CGI
 fields or behavior. See the [hardware evidence index](docs/hardware/README.md)
 for the tested scope and exclusions.
 
@@ -57,6 +58,17 @@ configuration writes because the task runs in check mode:
             name: users
       check_mode: true
       no_log: true
+      register: config_preview
+
+    - name: Review the configuration plan
+      ansible.builtin.debug:
+        msg:
+          diff: "{{ config_preview.diff | default({}) }}"
+          operations: "{{ config_preview.operations | default([]) }}"
+          warnings: "{{ config_preview.warnings | default([]) }}"
+          violations: "{{ config_preview.violations | default([]) }}"
+          blocked: "{{ config_preview.blocked | default(false) }}"
+      no_log: false
 ```
 
 The public configuration interfaces are `JTComSwitch.apply()` and

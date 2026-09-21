@@ -9,10 +9,11 @@ The Python API and the Ansible action use the same workflow:
 3. change the management address when needed;
 4. verify the final state and run one `saveconfig` persistence barrier.
 
-The workflow does not configure the controller network. The controller must have network access to both endpoint addresses; the target
-may become reachable only after the IP transition. It does not store secrets,
-reset the device, restore a backup, upgrade firmware, or roll back a partial
-change.
+The workflow does not configure the controller network. That network must allow
+access to the factory and target addresses when the switch uses each address.
+The target endpoint does not need to respond before the IP transition.
+Bootstrap does not store secrets, reset the device, restore a backup, upgrade
+firmware, or roll back a partial change.
 
 ## Requirements
 

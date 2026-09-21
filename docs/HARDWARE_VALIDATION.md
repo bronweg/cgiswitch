@@ -13,8 +13,10 @@ disposable VLAN range, and an independently tested recovery path. Identify the
 management port before any write and exclude it from desired state. Stop if
 the topology, recovery path, baseline, or disposable scope is uncertain.
 
-Supply credentials only through `JTCOM_USERNAME` and `JTCOM_PASSWORD`; never
-put them in commands, JSON, shell history, reports, or logs. Use a new private
+For `tools/hardware_validate.py`, supply credentials through `JTCOM_USERNAME`
+and `JTCOM_PASSWORD`. The Ansible bootstrap workflow instead receives secrets
+through its password arguments, supplied by Ansible variables or a secret provider.
+Keep secrets out of command lines, shell history, reports and logs. Use a new private
 output directory under ignored `hardware-evidence/` or outside the checkout.
 The runner refuses an existing output directory and creates its leaf with
 restricted permissions. Redact device identifiers, addresses, cookies, tokens,
