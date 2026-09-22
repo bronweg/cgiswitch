@@ -20,7 +20,7 @@ from cgiswitch.vendor.jtcom.endpoints import DEVICE_INFO
 
 
 class JTComBootstrapError(JTComError):
-    """Structured partial progress without rollback or sensitive error data."""
+    """Report bootstrap progress and failure context without rollback or secrets."""
 
     def __init__(self, result: dict[str, Any]) -> None:
         self._result = result
@@ -31,11 +31,13 @@ class JTComBootstrapError(JTComError):
 
 
 def bootstrap_switch(config: BootstrapConfig, *, check_mode: bool = False) -> dict[str, Any]:
-    """Converge a known switch using one public, controller-side bootstrap path.
+    """Converge a known switch through the canonical bootstrap workflow.
 
-    Every non-check run verifies the final identity and network before one
-    save barrier, including a logically unchanged rerun. Runtime readback cannot
-    prove prior persistence. Check mode never saves or changes configuration.
+    Credentials are changed before the management network. Every successful run
+    outside check mode verifies identity and network before one save barrier, including
+    a logically unchanged rerun. Check mode may authenticate and read state but
+    never mutates configuration or saves it. The result reports logical changes
+    separately from the persistence barrier.
     """
     if not isinstance(config, BootstrapConfig) or type(check_mode) is not bool:
         raise ValueError('Validated BootstrapConfig and boolean check_mode are required')

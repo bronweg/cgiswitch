@@ -16,7 +16,12 @@ from cgiswitch.model.management import ManagementNetworkConfig
 
 @dataclass(frozen=True)
 class BootstrapConfig:
-    """Bootstrap a known device without managing the controller's network."""
+    """Validated inputs for a static IPv4 bootstrap transition.
+
+    At least one expected identity field is required. The target URL must use
+    the configured management address. Password fields are excluded from the
+    dataclass representation.
+    """
 
     factory_url: str
     target_url: str
@@ -64,11 +69,13 @@ class BootstrapConfig:
                 raise ValueError('Timeouts and polling interval must be finite positive numbers')
 
     def credentials(self, target: bool) -> JTComCredentials:
+        """Return credentials for the selected state."""
         return JTComCredentials(
             self.username, self.target_password if target else self.factory_password,
         )
 
     def verify_expected(self, identity: DeviceIdentity) -> None:
+        """Raise when a discovered device does not match the expected identity."""
         if (
             self.expected_mac is not None
             and identity.mac_address != self.expected_mac.lower()

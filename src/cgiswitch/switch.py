@@ -58,18 +58,13 @@ class JTComSwitch:
     Communicates with the switch via its HTTP CGI web interface.
     HTML responses are parsed with BeautifulSoup to extract structured data.
 
-    Runtime architecture:
-
-    - current and desired VLAN membership are modeled canonically as
-      ``untagged_vlan`` + ``tagged_vlans``
-    - policy checks run on that canonical state
-    - JTCom backend ``access/native/permit`` state is produced only at the
-      final apply boundary
-    - post-apply verification compares canonical expected vs canonical actual
+    Use read_device_info(), read_ports() and read_vlans() for readback.
+    apply() manages VLANs and ports; bootstrap manages credentials and IP.
+    Writes are verified but are not transactional and have no automatic rollback.
 
     Args:
         hostname: IP address or hostname of the switch, optionally including
-            the URL scheme (e.g. ``http://192.168.1.1``).
+            the URL scheme (e.g. ``http://192.0.2.10``).
         username: Login username.
         password: Login password.
         connection: Typed HTTP connection settings.
@@ -187,11 +182,13 @@ class JTComSwitch:
 
         VLAN entries in *desired* carry ``state`` (``"present"`` or
         ``"absent"``); port entries are patch-style and only supplied fields
-        are changed. Items not listed in *desired* are left untouched.
+        are changed. Unlisted entries request no direct change; membership intent
+        can also affect membership of other VLANs.
 
         Args:
             desired: Incremental :class:`~cgiswitch.model.config.DeviceConfig`.
-            check_mode: If ``True``, return the plan without applying anything.
+            check_mode: If ``True``, read state and return a plan with no backup
+                or configuration writes. Authentication may use POST requests.
                 The instance policy configured at construction is used.
 
         Returns:

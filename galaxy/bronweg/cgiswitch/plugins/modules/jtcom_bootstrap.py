@@ -4,134 +4,167 @@
 from __future__ import annotations
 
 DOCUMENTATION = r"""
----
 module: jtcom_bootstrap
-short_description: Bootstrap a JTCom switch onto a management network
+short_description: Bootstrap a known switch with verified credentials and IPv4
+  state
 description:
-  - >-
-    Discovers the factory switch, authenticates, configures the management
-    network, verifies final identity and network state, and performs one save
-    persistence barrier on every successful non-check run.
-  - The action runs on the Ansible controller and calls the cgiswitch Python API.
-  - >-
-    Check mode performs authentication POSTs and GET discovery only; it does
-    not make configuration POSTs, save, reboot, or change the network.
-  - >-
-    A crash after a write and before save cannot be confirmed as persisted
-    because the firmware has no confirmed persisted readback; the automatic
-    save barrier on a later successful run reconciles that case.
+- Runs identity-bound discovery, credentials then network transitions in the controller
+  Python process.
+- Every successful non-check run performs one saveconfig, including logical no-ops.
+  No reboot or rollback is performed.
+- Check mode permits authentication POSTs and reads, but no configuration or save
+  POSTs.
 options:
   factory_url:
-    description: Factory URL used for discovery and initial authentication.
-    required: true
+    description: Explicit HTTP(S) IPv4 URL. Root path only; no credentials, query
+      or fragment.
     type: str
+    required: true
   target_url:
-    description: Target URL used after the management address transition.
-    required: true
+    description: Same URL rules as factory_url; address must equal management.address.
     type: str
+    required: true
   username:
-    description: Login username used at both endpoints.
-    required: true
+    description: 'Same username at both endpoints: 5-16 ASCII letters, digits
+      or underscores.'
     type: str
+    required: true
   factory_password:
-    description: Password used at the factory endpoint.
-    required: true
+    description: Non-empty current password, tried at either endpoint during discovery.
     type: str
+    required: true
     no_log: true
   password:
-    description: Password used at the target endpoint.
-    required: true
+    description: 'Target password: 6-16 ASCII letters, digits or characters <=>[]!@#$*().
+      Tried at either endpoint.'
     type: str
+    required: true
     no_log: true
   management:
-    description: Static management network with address, prefix_length, and gateway.
-    required: true
+    description: Required static IPv4 configuration. Unknown nested keys are rejected.
     type: dict
-    no_log: true
+    required: true
+    suboptions:
+      address:
+        description: IPv4 address; multicast and unspecified addresses are rejected.
+        type: str
+        required: true
+      prefix_length:
+        description: Strict integer IPv4 prefix length, 0..32.
+        type: int
+        required: true
+      gateway:
+        description: IPv4 address within the management subnet.
+        type: str
+        required: true
   expected_mac:
-    description: Optional identity check for the discovered switch MAC address.
+    description: Nonzero unicast MAC in colon-separated hex form. At least one
+      identity field is required; both are checked when supplied.
     type: str
   expected_serial:
-    description: Optional identity check for the discovered switch serial number.
+    description: Non-empty serial, matched exactly. At least one identity field
+      is required.
     type: str
   timeout_s:
-    description: Request timeout in seconds.
+    description: Finite positive request timeout in seconds.
     type: float
     default: 5.0
   transition_timeout_s:
-    description: Maximum time to wait for the new management endpoint.
+    description: Finite positive target reconnect deadline in seconds.
     type: float
     default: 60.0
   poll_interval_s:
-    description: Delay between transition endpoint polls.
+    description: Finite positive delay between target polls in seconds.
     type: float
     default: 1.0
   verify_tls:
-    description: Verify TLS certificates for HTTPS requests.
+    description: Strict boolean for HTTPS certificate verification; explicit URL
+      scheme is unchanged.
     type: bool
     default: true
 notes:
-  - The action requires either expected_mac or expected_serial.
-  - No reboot is performed.
-  - The factory and target passwords are kept out of action results.
+- The controller network must already provide reachability to factory and target
+  networks. This action never configures controller networking.
+- Unknown keys, invalid types and null required values are rejected before connection.
+  Numeric timeout options accept numbers, not numeric strings or booleans.
+- The action censors its result with no_log. Password values are not included
+  in bootstrap results.
+- Neither a model string nor a responding endpoint proves device identity. Different
+  discovered devices fail closed.
+requirements:
+- Python 3.11+ and cgiswitch in the controller environment; ansible-core 2.14+.
 author:
-  - cgiswitch contributors
+- cgiswitch contributors
 """
 
 EXAMPLES = r"""
-- name: Bootstrap a factory switch
+- name: Preview bootstrap for a known switch
   bronweg.cgiswitch.jtcom_bootstrap:
     factory_url: http://192.0.2.1
-    target_url: https://198.51.100.10
+    target_url: http://198.51.100.10
     username: admin
     factory_password: "{{ factory_password }}"
-    password: "{{ jtcom_password }}"
+    password: "{{ target_password }}"
+    expected_mac: "00:11:22:33:44:55"
     management:
       address: 198.51.100.10
       prefix_length: 24
       gateway: 198.51.100.1
-    expected_mac: "00:11:22:33:44:55"
-    verify_tls: false
+  check_mode: true
+  no_log: true
 """
 
 RETURN = r"""
 changed:
-  description: >-
-    Whether the requested password or management network differed from the
-    discovered state. Check mode reports predicted logical changes. The save
-    persistence barrier does not count as a logical change.
+  description: Logical credential/network change, excluding save. On transition
+    failure, may mean a configuration write was attempted.
   type: bool
-  returned: always
+  returned: success or failure
 operations:
-  description: Deterministic planned operations.
+  description: Ordered logical operations, empty when runtime state is desired.
   type: list
-  returned: always
+  returned: success or check mode
 completed_operations:
-  description: Operations completed before returning or failing.
+  description: Logical operations confirmed complete before return or failure.
   type: list
-  returned: always
+  returned: success or structured bootstrap failure
 endpoint:
-  description: Endpoint used for the final observed state.
+  description: Selected endpoint in check mode; verified target on live success.
   type: str
-  returned: success
+  returned: success or check mode
 device_identity:
-  description: Safe discovered device identity fields.
+  description: Verified device identity; null if discovery failed before verification.
   type: dict
-  returned: success
+  returned: success or structured bootstrap failure
 persistence:
-  description: >-
-    Persistence observation state. Check mode always returns save_required,
-    including a logical no-op; every successful non-check run returns saved.
+  description: save_required in check mode, even on a no-op; saved on live success.
   type: str
-  returned: success
-last_verified_endpoint:
-  description: >-
-    Last endpoint with successfully verified device identity. Network verification
-    at that endpoint may not have completed.
+  returned: success or check mode
+stage:
+  description: Failed stage, including persistence_preflight or persistence.
   type: str
-  returned: failure
-target_reached:
-  description: Whether the target endpoint was reached.
+  returned: structured bootstrap failure
+failed_operation:
+  description: Failed logical operation, configuration:save, or null before an
+    operation starts.
+  type: dict
+  returned: structured bootstrap failure
+write_attempted:
+  description: Whether any configuration or save POST was attempted.
   type: bool
-  returned: success
+  returned: structured bootstrap failure
+underlying_exception:
+  description: Error type and sanitized message, without raw response details.
+  type: dict
+  returned: structured bootstrap failure
+last_verified_endpoint:
+  description: Last endpoint with verified identity; network verification may
+    not have completed. Null before any verified endpoint.
+  type: str
+  returned: structured bootstrap failure
+target_reached:
+  description: Whether the target was reached; does not alone prove identity or
+    network verification.
+  type: bool
+  returned: success or structured bootstrap failure
 """

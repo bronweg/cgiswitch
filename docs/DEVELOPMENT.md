@@ -1,19 +1,13 @@
-# Development Guide
+# Development guide
 
-The project remains **Alpha**. Automated tests use saved HTML fixtures and
-mocked requests; they do not establish compatibility with a particular device
-or firmware. Hardware validation is still pending.
+Unit tests use fixtures and mocked requests. Device observations belong in the
+[hardware evidence index](hardware/README.md).
 
 ## Setup
 
-Use Python 3.11 or later and Git. CI runs Python 3.11, 3.12, and 3.13.
-The collection declares `ansible-core >=2.14.0`; CI installs
-`ansible-core>=2.15` with a version compatible with each Python environment.
-This is not a test matrix of every Ansible release.
+Use Python 3.11 or later:
 
 ```bash
-git clone https://github.com/bronweg/cgiswitch.git
-cd cgiswitch
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -21,41 +15,39 @@ python -m pip install -e ".[dev]" 'ansible-core>=2.15'
 git config core.hooksPath .githooks
 ```
 
-All committed content and commit messages must be in English. The local hooks
-and CI mechanically reject Cyrillic; they do not detect every non-English
-language. Check staged content with `python3 tools/check_language.py --staged`.
+The development extra installs pytest, coverage, Ruff, Mypy, build, request
+types, and mocked HTTP test support. All committed content, comments, fixtures,
+generated files, and commit messages must be English. Check tracked content with:
 
-## Architecture
+```bash
+python tools/check_language.py
+python tools/check_language.py --staged
+```
 
-| Location | Responsibility |
-|---|---|
-| `src/cgiswitch/switch.py` | Public `JTComSwitch` API and apply orchestration |
-| `src/cgiswitch/client/` | HTTP, authentication, backup validation, write payloads |
-| `src/cgiswitch/parser/` | Firmware-specific HTML parsing |
-| `src/cgiswitch/model/` | Typed configuration, state, connection, and policy models |
-| `src/cgiswitch/utils/` | Canonical normalization, planning, policy, operation compilation, diffs |
-| `src/cgiswitch/vendor/jtcom/` | CGI paths and firmware field mappings |
-| `galaxy/bronweg/cgiswitch/plugins/action/` | Ansible controller execution and result mapping |
-| `galaxy/bronweg/cgiswitch/plugins/module_utils/` | Ansible-specific nested input validation |
-| `galaxy/bronweg/cgiswitch/plugins/modules/` | Module documentation and fallback stub |
-| `tests/` | Unit tests, mocked orchestration, and HTML fixtures |
-| `examples/` | Python usage scripts |
-| `galaxy/bronweg/cgiswitch/examples/` | Ansible playbooks |
+## Responsibilities
 
-The Python core is independent of Ansible. The collection imports the core;
-the core does not import collection input parsing. Unit tests resolve the
-collection namespace against the checkout using `tests/conftest.py`.
+| Area | Responsibility |
+| --- | --- |
+| `src/cgiswitch/bootstrap/` | Identity-bound bootstrap discovery and transitions |
+| `src/cgiswitch/switch.py` | Public Python API and apply orchestration |
+| `src/cgiswitch/client/` | HTTP, sessions, backups, and CGI writes |
+| `src/cgiswitch/parser/` | Strict firmware HTML parsing |
+| `src/cgiswitch/model/` | Typed desired and read-state models |
+| `src/cgiswitch/utils/` | Canonical state, normalization, planning, policy, and compilation |
+| `src/cgiswitch/vendor/jtcom/` | JTCom endpoints and mappings |
+| `galaxy/bronweg/cgiswitch/plugins/` | Ansible validation, action, module, and documentation |
+| `tests/` | Unit tests, fixtures, and mocked orchestration |
+| `tools/hardware_validate.py` | Explicitly scoped operator runbook helper |
+| `docs/hardware/` | Evidence index and dated reports |
 
-Input validation, current-state reads, planning, policy, and payload compilation
-precede backup and writes. Check mode still reads the device and validates the
-request. It does not download a backup or write configuration. Changes are
-applied directly through CGI requests: there is no transactional commit or
-automatic rollback. Preserve structured failure context and the verification
-snapshot when changing orchestration.
+The Python core owns behavior and canonical models. The Ansible collection is
+the supported Ansible interface and owns nested input validation. Parsers must
+reject missing, malformed, ambiguous, or unknown device state. Do not infer
+omitted values or log credentials and session secrets.
 
-## Checks
+## Required checks
 
-Run from the repository root in the activated environment:
+Run these commands from the repository root before handoff:
 
 ```bash
 python tools/check_language.py
@@ -66,30 +58,22 @@ python -m build --outdir /tmp/cgiswitch-python-dist
 ansible-galaxy collection build --force --output-path /tmp/cgiswitch-galaxy-dist galaxy/bronweg/cgiswitch
 ansible-galaxy collection install /tmp/cgiswitch-galaxy-dist/*.tar.gz --force
 ansible-doc bronweg.cgiswitch.jtcom_config
+ansible-doc bronweg.cgiswitch.jtcom_bootstrap
 ansible-playbook -i localhost, --syntax-check galaxy/bronweg/cgiswitch/examples/*.yml
 ```
 
-For focused work, select a test file, for example
-`pytest tests/unit/test_parser_vlan.py -v`. The default test command also
-produces coverage reports. Syntax checks do not connect to a switch and do not
-validate device-specific assumptions in example playbooks.
+For focused work, run a specific test such as
+`pytest tests/unit/test_parser_vlan.py -v`. Builds and syntax checks do not
+prove compatibility with a physical switch.
 
-## Extending Device Support
+## Change workflow
 
-Identify the CGI response and capture a sanitized fixture before changing a
-parser. Add model and parser tests for both valid and malformed input. Do not
-infer undocumented defaults or backup signatures. Different firmware may use
-different fields, headers, or request semantics even on similarly named devices.
+Capture a sanitized device response before changing a parser and add valid and
+malformed fixture coverage. Keep canonical on-wire membership separate from
+JTCom's access/trunk representation. Define policy, deterministic operation
+ordering, and readback verification before adding a write. Preserve structured
+failure context; the apply path has no transaction or automatic rollback.
 
-Before adding a write operation, define its canonical intent, policy checks,
-preflight requirements, deterministic order, and verification behavior. Changes
-to Ansible input belong in the collection layer. Keep documentation examples
-consistent with its strict runtime validation.
-
-## Release Status
-
-Python package and collection versions remain `0.1.0`; package metadata remains
-Alpha. Building artifacts is a local validation step, not a release or a claim
-of hardware compatibility. A release requires a separate maintainer decision
-and documented hardware validation results. Do not promote the maturity status
-based only on mocked tests or successful builds.
+Hardware procedures belong in [the validation runbook](HARDWARE_VALIDATION.md)
+and their results belong in a dated report under `docs/hardware/`. Do not place
+raw captures, credentials, cookies, backups, or private evidence in Git.
